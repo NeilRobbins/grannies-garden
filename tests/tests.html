@@ -32,6 +32,10 @@
     const doc = frame.contentDocument;
     const win = frame.contentWindow;
 
+    // Speed up animation so narrative-heavy tests don't time out.
+    // We keep it >0 so the "speed is a sane ms value" test still holds.
+    GG.DEFAULT_TYPEWRITER_SPEED = 1;
+
     for (const t of tests) {
       try {
         await t.fn({ GG, doc, win, frame });
@@ -446,6 +450,82 @@
       assert(hasWord || art.title,
         `${key}: art should include part of the location name or a title`);
     }
+  });
+
+  // ============================================================
+  // Task 5: Location Content Tests
+  // ============================================================
+
+  test('GG.NARRATIVE has first-visit text for each location', ({ GG }) => {
+    assert(GG.NARRATIVE, 'GG.NARRATIVE should exist');
+    for (const key of Object.keys(GG.LOCATIONS)) {
+      const n = GG.NARRATIVE[key];
+      assert(n && typeof n.first === 'string' && n.first.length > 20,
+        `${key} needs a meaty first-visit narrative`);
+    }
+  });
+
+  test('locations have distinct revisit text', ({ GG }) => {
+    for (const key of Object.keys(GG.LOCATIONS)) {
+      const n = GG.NARRATIVE[key];
+      assert(n.revisit && n.revisit !== n.first,
+        `${key} revisit text should differ from first-visit`);
+    }
+  });
+
+  test('gardenGate narrative mentions Granny and the quest', ({ GG }) => {
+    const n = GG.NARRATIVE.gardenGate.first.toLowerCase();
+    assert(n.includes('granny'), 'quest briefing should mention Granny');
+    assert(/child|children|king|queen|rescue|lost/.test(n),
+      'quest briefing should mention the children/king/queen/rescue');
+  });
+
+  test('narrative uses second-person voice ("you")', ({ GG }) => {
+    for (const key of Object.keys(GG.LOCATIONS)) {
+      const text = GG.NARRATIVE[key].first.toLowerCase();
+      assert(/\byou\b|\byour\b/.test(text),
+        `${key} should use second-person voice, got: "${text.slice(0, 60)}..."`);
+    }
+  });
+
+  test('first-visit narrative is shown on first render', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('forest');
+    const text = doc.getElementById('text-area').textContent;
+    // First visit; text should include first-visit content
+    assert(text.length > 10, 'narrative should be rendered');
+    // Should be close to the defined first-visit text (allow for truncation)
+    const expected = GG.NARRATIVE.forest.first.slice(0, 20);
+    assert(text.includes(expected.slice(0, 15)),
+      `narrative should match first-visit text for forest. got "${text.slice(0,60)}..."`);
+  });
+
+  test('revisit narrative shown on second visit', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('river');
+    GG.skipTypewriter();
+    await new Promise(r => setTimeout(r, 30));
+    await GG.renderLocation('river');
+    const text = doc.getElementById('text-area').textContent;
+    const expected = GG.NARRATIVE.river.revisit.slice(0, 15);
+    assert(text.includes(expected),
+      `revisit text should be used on second visit. got "${text.slice(0,60)}..."`);
+  });
+
+  test('Granny provides contextual hint based on progress', ({ GG }) => {
+    assert(typeof GG.grannyHint === 'function', 'GG.grannyHint should exist');
+    GG.newGame();
+    const hint1 = GG.grannyHint();
+    assert(typeof hint1 === 'string' && hint1.length > 10, 'hint should be a string');
+    // With children rescued, hint should change
+    GG.state.rescued = ['a', 'b', 'c'];
+    const hint2 = GG.grannyHint();
+    assert(hint2 !== hint1, 'hint should change based on rescue progress');
+    // Fully rescued
+    GG.state.rescued = ['a','b','c','d','e','f'];
+    const hint3 = GG.grannyHint();
+    assert(hint3 !== hint1 && hint3 !== hint2,
+      'fully-rescued hint should differ');
   });
 
   runAll();

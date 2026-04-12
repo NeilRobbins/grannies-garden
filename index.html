@@ -389,6 +389,117 @@
     }
   };
 
+  // --- Narrative text (first-visit / revisit) --------------------------
+  GG.NARRATIVE = {
+    gardenGate: {
+      first:
+        "Granny leans on her garden gate, her apron dusted with flour. " +
+        "\"Oh dear,\" she says softly. \"The King and Queen of the " +
+        "Mountains have lost their six children to the Wicked Witch. " +
+        "Will you help me find them?\" You feel the weight of the quest " +
+        "settle warmly on your shoulders. The gate creaks open.",
+      revisit:
+        "Granny welcomes you back to the gate. \"You are doing " +
+        "bravely, little one,\" she says, pressing your hand. The " +
+        "garden smells of roses and old magic.",
+    },
+    crossroads: {
+      first:
+        "You stand at an old signpost where four paths part ways. " +
+        "A dusty wind whispers between the arrows. Somewhere beyond " +
+        "each path, a lost child waits to be found.",
+      revisit:
+        "The crossroads are quiet once more. You can hear only your " +
+        "own breath, and the creak of the old signpost turning in the " +
+        "wind.",
+    },
+    forest: {
+      first:
+        "Tall pines crowd the path, and the air grows cool and still. " +
+        "You are sure you can hear footsteps, but whenever you look, " +
+        "there is nothing but shadow. Somewhere a child is hiding.",
+      revisit:
+        "You step carefully between the trees. Dry needles crunch " +
+        "underfoot, and a low mist clings to the branches.",
+    },
+    river: {
+      first:
+        "The river sings to itself as it tumbles over mossy stones. " +
+        "On the far bank you glimpse a small figure sitting alone. " +
+        "You must find a way across.",
+      revisit:
+        "The enchanted river chatters merrily over its stones. " +
+        "Sunlight dances on the surface as the current pulls past you.",
+    },
+    mountainPath: {
+      first:
+        "The path winds steeply upward into a cold, thin wind. You " +
+        "can see a child's red cloak fluttering near the summit, " +
+        "but the way is treacherous with loose stones.",
+      revisit:
+        "You shoulder the climb once more. The mountain is vast " +
+        "and silent, and your breath clouds the sharp air.",
+    },
+    cottage: {
+      first:
+        "You creep closer to the witch's cottage. Purple smoke curls " +
+        "from the chimney, and something wicked scuttles behind the " +
+        "window. You hear a little voice crying inside.",
+      revisit:
+        "The cottage crouches in the clearing like a toad. You dare " +
+        "not make a sound. Somewhere within, the witch may still be " +
+        "watching.",
+    },
+    crystalCave: {
+      first:
+        "Darkness presses in from all sides. Without a light you can " +
+        "see nothing at all, though the cave seems to glitter far away " +
+        "in the blackness.",
+      revisit:
+        "Your lantern's glow dances across a thousand crystal faces. " +
+        "The cave hums quietly, almost like a distant song.",
+    },
+    castleRuins: {
+      first:
+        "The castle gate is bound in iron and wound with cruel " +
+        "brambles. A last child is said to be held within. You will " +
+        "need the golden key - and your wits.",
+      revisit:
+        "The ruined walls loom tall. Crows wheel silently against " +
+        "the grey sky above.",
+    },
+    throneRoom: {
+      first:
+        "Trumpets sound as you step into the throne room. The King " +
+        "and Queen rush to embrace their children. Tears and laughter " +
+        "fill the great hall. You have done what no one else could.",
+      revisit:
+        "The throne room still rings with celebration in your " +
+        "honour.",
+    },
+  };
+
+  /**
+   * Return a Granny hint based on current rescue progress.
+   * The three branches correspond to: none rescued, some rescued,
+   * all rescued.
+   */
+  GG.grannyHint = function () {
+    const rescued = (GG.state && GG.state.rescued) || [];
+    if (rescued.length === 0) {
+      return "Granny whispers: \"Begin at the crossroads. Take each " +
+             "path in turn and be kind to anyone you meet.\"";
+    }
+    if (rescued.length < 6) {
+      return "Granny says warmly: \"You have brought " + rescued.length +
+             " child" + (rescued.length === 1 ? '' : 'ren') +
+             " home already. The others are waiting. Beware the cottage " +
+             "if you are not ready.\"";
+    }
+    return "Granny's eyes shine with pride. \"All six children are " +
+           "safe. Now go, little one - a throne room awaits!\"";
+  };
+
   // --- Teletext block art ----------------------------------------------
   // Each scene is a small array of strings painted into the art area.
   // We stick to block characters, box-drawing, and simple punctuation so
@@ -662,10 +773,20 @@
     }
     header.textContent = '— ' + loc.name + ' —';
 
-    // Narrative text (placeholder; task 5 fills this in).
+    // Narrative text: first-visit on first visit, revisit otherwise.
     const textArea = document.getElementById('text-area');
-    const narration = (GG.NARRATIVE && GG.NARRATIVE[key]) ||
-      'You are at ' + loc.name + '.';
+    const visits = GG.state.visited[key] || 0;
+    const entry  = GG.NARRATIVE && GG.NARRATIVE[key];
+    let narration;
+    if (entry) {
+      narration = visits <= 1 ? entry.first : entry.revisit;
+    } else {
+      narration = 'You are at ' + loc.name + '.';
+    }
+    // Granny adds a contextual hint on revisits of the garden gate.
+    if (key === 'gardenGate' && visits > 1) {
+      narration += ' ' + GG.grannyHint();
+    }
     await GG.typewriter(textArea, narration, { onChar: GG.blip });
 
     // Menu
