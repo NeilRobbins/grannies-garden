@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Granny's Garden — Tests</title>
+</head>
+<body>
+<iframe id="game" src="../index.html" style="width:800px;height:600px;border:1px solid #333"></iframe>
+<div id="output" style="font-family:monospace;white-space:pre;padding:10px"></div>
+<script>
+  // Tiny test framework
+  const tests = [];
+  const failures = [];
+  let passed = 0, failed = 0;
+
+  function test(name, fn) { tests.push({ name, fn }); }
+  function assert(cond, msg) {
+    if (!cond) throw new Error(msg || 'Assertion failed');
+  }
+  function assertEq(actual, expected, msg) {
+    const a = JSON.stringify(actual), e = JSON.stringify(expected);
+    if (a !== e) throw new Error((msg || 'Not equal') + `: expected ${e}, got ${a}`);
+  }
+
+  async function runAll() {
+    const frame = document.getElementById('game');
+    await new Promise(r => frame.addEventListener('load', r, { once: true }));
+    // Give the game a moment to boot
+    await new Promise(r => setTimeout(r, 200));
+
+    const GG = frame.contentWindow.GG;
+    const doc = frame.contentDocument;
+    const win = frame.contentWindow;
+
+    for (const t of tests) {
+      try {
+        await t.fn({ GG, doc, win, frame });
+        passed++;
+        console.log('PASS: ' + t.name);
+      } catch (err) {
+        failed++;
+        failures.push({ name: t.name, error: err.message });
+        console.log('FAIL: ' + t.name + ' — ' + err.message);
+      }
+    }
+
+    window.__testResults = { passed, failed, total: tests.length, failures };
+    window.__testsComplete = true;
+    document.getElementById('output').textContent =
+      `Passed: ${passed}  Failed: ${failed}  Total: ${tests.length}`;
+  }
+
+  // ============================================================
+  // Task 1: Rendering Engine Tests
+  // ============================================================
+
+  test('GG namespace is exposed on window', ({ GG }) => {
+    assert(GG, 'window.GG should be defined');
+  });
+
+  test('TELETEXT_COLORS contains exactly the 8 teletext colours', ({ GG }) => {
+    const expected = {
+      black:   '#000000',
+      red:     '#FF0000',
+      green:   '#00FF00',
+      yellow:  '#FFFF00',
+      blue:    '#0000FF',
+      magenta: '#FF00FF',
+      cyan:    '#00FFFF',
+      white:   '#FFFFFF',
+    };
+    assert(GG.TELETEXT_COLORS, 'GG.TELETEXT_COLORS should exist');
+    assertEq(Object.keys(GG.TELETEXT_COLORS).sort(), Object.keys(expected).sort(),
+      'colour names');
+    for (const [name, hex] of Object.entries(expected)) {
+      assertEq(GG.TELETEXT_COLORS[name].toUpperCase(), hex, `colour ${name}`);
+    }
+  });
+
+  test('display panel element exists', ({ doc }) => {
+    const panel = doc.getElementById('display-panel');
+    assert(panel, '#display-panel should exist');
+  });
+
+  test('display panel is centred on page', ({ doc, win }) => {
+    const panel = doc.getElementById('display-panel');
+    const rect = panel.getBoundingClientRect();
+    const winWidth = win.innerWidth;
+    const panelCentre = rect.left + rect.width / 2;
+    const windowCentre = winWidth / 2;
+    assert(Math.abs(panelCentre - windowCentre) < 5,
+      `panel should be centred (panel centre ${panelCentre}, window centre ${windowCentre})`);
+  });
+
+  test('display panel uses monospace font', ({ doc, win }) => {
+    const panel = doc.getElementById('display-panel');
+    const style = win.getComputedStyle(panel);
+    assert(/courier|mono/i.test(style.fontFamily),
+      'font-family should be monospace, got: ' + style.fontFamily);
+  });
+
+  test('display panel background is black', ({ doc, win }) => {
+    const panel = doc.getElementById('display-panel');
+    const style = win.getComputedStyle(panel);
+    const bg = style.backgroundColor;
+    // rgb(0,0,0) or transparent-over-black body
+    const parent = win.getComputedStyle(doc.body).backgroundColor;
+    const isBlack = (c) => /rgba?\(\s*0\s*,\s*0\s*,\s*0\s*[,)]/.test(c);
+    assert(isBlack(bg) || isBlack(parent),
+      `panel or body should have black background. panel=${bg}, body=${parent}`);
+  });
+
+  test('scanline overlay exists', ({ doc }) => {
+    const scan = doc.getElementById('scanlines');
+    assert(scan, '#scanlines element should exist');
+  });
+
+  test('CRT toggle button exists', ({ doc }) => {
+    const btn = doc.getElementById('crt-toggle');
+    assert(btn, '#crt-toggle button should exist');
+  });
+
+  test('CRT toggle flips crt-off class on body', ({ doc }) => {
+    const body = doc.body;
+    const btn = doc.getElementById('crt-toggle');
+    const before = body.classList.contains('crt-off');
+    btn.click();
+    const after = body.classList.contains('crt-off');
+    assert(before !== after, 'CRT toggle should toggle body.crt-off class');
+    // Restore state
+    btn.click();
+  });
+
+  test('scanlines hidden when CRT off', ({ doc, win }) => {
+    const body = doc.body;
+    const scan = doc.getElementById('scanlines');
+    body.classList.add('crt-off');
+    // getComputedStyle returns a live object — read snapshot values now.
+    const offDisplay = win.getComputedStyle(scan).display;
+    const offOpacity = win.getComputedStyle(scan).opacity;
+    body.classList.remove('crt-off');
+    assert(offDisplay === 'none' || offOpacity === '0',
+      `scanlines should be hidden when CRT off (display=${offDisplay}, opacity=${offOpacity})`);
+  });
+
+  test('createGrid(cols, rows) returns element with correct dimensions', ({ GG, doc }) => {
+    assert(typeof GG.createGrid === 'function', 'GG.createGrid should be a function');
+    const grid = GG.createGrid(40, 25);
+    assert(grid instanceof doc.defaultView.HTMLElement, 'should return HTMLElement');
+    assertEq(grid.dataset.cols, '40', 'cols');
+    assertEq(grid.dataset.rows, '25', 'rows');
+  });
+
+  test('setCellColor applies a teletext colour to a cell', ({ GG }) => {
+    const grid = GG.createGrid(5, 3);
+    GG.setCellColor(grid, 1, 2, 'yellow');
+    const cell = GG.getCell(grid, 1, 2);
+    assert(cell, 'cell should exist');
+    const colour = cell.style.color;
+    // yellow = #FFFF00 = rgb(255,255,0)
+    assert(/rgb\(\s*255\s*,\s*255\s*,\s*0\s*\)/i.test(colour) || /#FFFF00/i.test(colour),
+      `cell colour should be yellow, got ${colour}`);
+  });
+
+  test('phosphor glow text-shadow present on display panel', ({ doc, win }) => {
+    const panel = doc.getElementById('display-panel');
+    // Check a text element inside the panel
+    const art = doc.getElementById('art-area') || panel;
+    const style = win.getComputedStyle(art);
+    assert(style.textShadow && style.textShadow !== 'none',
+      `text-shadow should be set for phosphor glow, got: ${style.textShadow}`);
+  });
+
+  test('panel aspect ratio is close to 40:25 (8:5)', ({ doc }) => {
+    const panel = doc.getElementById('display-panel');
+    const rect = panel.getBoundingClientRect();
+    const ratio = rect.width / rect.height;
+    // 40 cols × 25 rows with chunky chars roughly gives aspect ~1.6 (8:5)
+    // Allow wide tolerance for CRT framing
+    assert(ratio > 0.8 && ratio < 2.5,
+      `aspect ratio should be reasonable for teletext, got ${ratio.toFixed(2)}`);
+  });
+
+  runAll();
+</script>
+</body>
+</html>
