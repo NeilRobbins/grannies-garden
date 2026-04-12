@@ -271,9 +271,95 @@
     document.body.classList.toggle('crt-off');
   };
 
+  // --- Typewriter text animation ---------------------------------------
+  GG.DEFAULT_TYPEWRITER_SPEED = 28;   // ms per character (feels BBC-ish)
+  let activeTypewriter = null;        // the current in-flight animation
+
+  /**
+   * Render `text` into `target` character-by-character.
+   * Returns a Promise that resolves when the full text is rendered or skipped.
+   * Options: { speed, onChar, clear }
+   */
+  GG.typewriter = function (target, text, opts) {
+    opts = opts || {};
+    const speed  = opts.speed  != null ? opts.speed  : GG.DEFAULT_TYPEWRITER_SPEED;
+    const onChar = opts.onChar || null;
+    const clear  = opts.clear !== false;   // default true
+
+    // Cancel any previous animation cleanly.
+    if (activeTypewriter) activeTypewriter.skip();
+
+    if (clear) target.textContent = '';
+    const startIdx = target.textContent.length;
+
+    return new Promise(resolve => {
+      let i = 0;
+      let timer = null;
+      let cancelled = false;
+
+      const state = {
+        skip() {
+          if (cancelled) return;
+          cancelled = true;
+          if (timer) clearTimeout(timer);
+          target.textContent = (clear ? '' : target.textContent.slice(0, startIdx)) + text;
+          if (activeTypewriter === state) activeTypewriter = null;
+          resolve();
+        },
+      };
+      activeTypewriter = state;
+
+      function step() {
+        if (cancelled) return;
+        if (i >= text.length) {
+          if (activeTypewriter === state) activeTypewriter = null;
+          resolve();
+          return;
+        }
+        target.textContent += text[i];
+        if (onChar) {
+          try { onChar(text[i], i); } catch (e) { /* never break the anim */ }
+        }
+        i++;
+        timer = setTimeout(step, speed);
+      }
+      step();
+    });
+  };
+
+  GG.skipTypewriter = function () {
+    if (activeTypewriter) activeTypewriter.skip();
+  };
+
+  /**
+   * Render a sequence of text blocks one after another (non-clearing).
+   * Useful for multi-paragraph narration without wiping previous text.
+   */
+  GG.queueTypewriter = async function (target, blocks, opts) {
+    opts = opts || {};
+    target.textContent = '';
+    for (let i = 0; i < blocks.length; i++) {
+      const blockOpts = Object.assign({}, opts, { clear: false });
+      await GG.typewriter(target, blocks[i], blockOpts);
+    }
+  };
+
   // --- Bootstrap --------------------------------------------------------
   function boot() {
     document.getElementById('crt-toggle').addEventListener('click', GG.toggleCRT);
+
+    // Skip typewriter on click anywhere in the panel or on Space key.
+    const panel = document.getElementById('display-panel');
+    panel.addEventListener('click', (ev) => {
+      // Don't skip when clicking a menu choice button.
+      if (ev.target && ev.target.closest('[data-menu-choice]')) return;
+      GG.skipTypewriter();
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === ' ' || ev.code === 'Space') {
+        GG.skipTypewriter();
+      }
+    });
   }
 
   if (document.readyState === 'loading') {

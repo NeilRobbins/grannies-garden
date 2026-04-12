@@ -181,6 +181,96 @@
       `aspect ratio should be reasonable for teletext, got ${ratio.toFixed(2)}`);
   });
 
+  // ============================================================
+  // Task 2: Typewriter Text Animation Tests
+  // ============================================================
+
+  test('GG.typewriter is a function', ({ GG }) => {
+    assert(typeof GG.typewriter === 'function', 'GG.typewriter should exist');
+  });
+
+  test('typewriter reveals text character-by-character', async ({ GG, doc, win }) => {
+    const target = doc.createElement('div');
+    doc.body.appendChild(target);
+    // Speed 1ms per char for quick test
+    const promise = GG.typewriter(target, 'hello', { speed: 1 });
+    // After 1 frame the text shouldn't be fully rendered
+    await new Promise(r => setTimeout(r, 1));
+    // Immediately partial (could be anywhere from 0 to partial)
+    // Wait a bit more but not full duration
+    await new Promise(r => setTimeout(r, 2));
+    const partial = target.textContent;
+    assert(partial.length < 'hello'.length,
+      `should still be animating, got full text "${partial}"`);
+    await promise;
+    assertEq(target.textContent, 'hello', 'should be fully rendered after await');
+    target.remove();
+  });
+
+  test('typewriter resolves promise when complete', async ({ GG, doc }) => {
+    const target = doc.createElement('div');
+    doc.body.appendChild(target);
+    const p = GG.typewriter(target, 'done', { speed: 1 });
+    assert(p && typeof p.then === 'function', 'should return a Promise');
+    await p;
+    assertEq(target.textContent, 'done', 'text complete after await');
+    target.remove();
+  });
+
+  test('typewriter skip() fast-forwards to full text', async ({ GG, doc }) => {
+    const target = doc.createElement('div');
+    doc.body.appendChild(target);
+    const p = GG.typewriter(target, 'longer text here', { speed: 50 });
+    await new Promise(r => setTimeout(r, 10));
+    GG.skipTypewriter();
+    await p;
+    assertEq(target.textContent, 'longer text here', 'should skip to end');
+    target.remove();
+  });
+
+  test('clicking display panel skips typewriter', async ({ GG, doc }) => {
+    const target = doc.getElementById('text-area');
+    const p = GG.typewriter(target, 'abcdefghij', { speed: 50 });
+    await new Promise(r => setTimeout(r, 5));
+    doc.getElementById('display-panel').click();
+    await p;
+    assertEq(target.textContent, 'abcdefghij', 'click should skip');
+  });
+
+  test('Space key skips typewriter', async ({ GG, doc, win }) => {
+    const target = doc.getElementById('text-area');
+    const p = GG.typewriter(target, 'zxcvbn', { speed: 50 });
+    await new Promise(r => setTimeout(r, 5));
+    const ev = new win.KeyboardEvent('keydown', { key: ' ', bubbles: true });
+    doc.dispatchEvent(ev);
+    await p;
+    assertEq(target.textContent, 'zxcvbn', 'space should skip');
+  });
+
+  test('typewriter speed is configurable (DEFAULT_SPEED constant exists)', ({ GG }) => {
+    assert(typeof GG.DEFAULT_TYPEWRITER_SPEED === 'number',
+      'GG.DEFAULT_TYPEWRITER_SPEED should be a number');
+    assert(GG.DEFAULT_TYPEWRITER_SPEED > 0 && GG.DEFAULT_TYPEWRITER_SPEED < 200,
+      'speed should be a reasonable ms-per-char value');
+  });
+
+  test('typewriter calls per-character callback (blip hook)', async ({ GG, doc }) => {
+    const target = doc.createElement('div');
+    doc.body.appendChild(target);
+    let calls = 0;
+    await GG.typewriter(target, 'xyz', { speed: 1, onChar: () => calls++ });
+    assertEq(calls, 3, 'onChar called once per character');
+    target.remove();
+  });
+
+  test('queueTypewriter renders blocks sequentially', async ({ GG, doc }) => {
+    const target = doc.createElement('div');
+    doc.body.appendChild(target);
+    await GG.queueTypewriter(target, ['one ', 'two'], { speed: 1 });
+    assertEq(target.textContent, 'one two', 'both blocks concatenated');
+    target.remove();
+  });
+
   runAll();
 </script>
 </body>
