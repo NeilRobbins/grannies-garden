@@ -126,6 +126,25 @@
     margin: 2px 8px;
   }
 
+  /* ---------- Teletext art ---------- */
+  .tt-art {
+    margin: 0;
+    padding: 0;
+    font-family: inherit;
+    font-size: 16px;
+    line-height: 1.05;
+    white-space: pre;
+    font-weight: 700;
+    text-shadow: inherit;
+    letter-spacing: 0;
+  }
+  @media (max-width: 720px) {
+    .tt-art { font-size: 12px; }
+  }
+  @media (max-width: 480px) {
+    .tt-art { font-size: 9px; }
+  }
+
   /* ---------- Grid (createGrid) helper element ---------- */
   .tt-grid {
     display: inline-grid;
@@ -370,6 +389,182 @@
     }
   };
 
+  // --- Teletext block art ----------------------------------------------
+  // Each scene is a small array of strings painted into the art area.
+  // We stick to block characters, box-drawing, and simple punctuation so
+  // the look stays consistent with BBC Micro Mode 7 teletext.
+  GG.ART = {
+    gardenGate: {
+      colour: 'green',
+      rows: [
+        "        GRANNY'S GARDEN GATE            ",
+        "                                        ",
+        "        __/\\__  __/\\__  __/\\__          ",
+        "       (      )(      )(      )         ",
+        "        \\/  \\/  \\/  \\/  \\/  \\/          ",
+        "     ______|___|______|___|______       ",
+        "    |  ___     ___     ___       |      ",
+        "    | |   |   |   |   |   |      |      ",
+        "    | | + |   |   |   | + |      |      ",
+        "    | |___|   |___|   |___|      |      ",
+        "    |____|_____|________|________|      ",
+        "     ##   ||   ||   ##  ||   ##         ",
+        "     ##   ||   ||   ##  ||   ##         ",
+      ],
+    },
+    crossroads: {
+      colour: 'yellow',
+      rows: [
+        "         THE CROSSROADS                  ",
+        "                                        ",
+        "              |  |                      ",
+        "              |  |                      ",
+        "     _________|  |_________             ",
+        "    /         .::.         \\            ",
+        "   /    N     ::::     N    \\           ",
+        "   \\   <-+->  ::::  <-+->   /           ",
+        "    \\____     ::::     ____/            ",
+        "              ::::                      ",
+        "              ::::                      ",
+        "              |  |                      ",
+        "              |  |                      ",
+      ],
+    },
+    forest: {
+      colour: 'green',
+      rows: [
+        "         THE DARK FOREST                 ",
+        "                                        ",
+        "     /\\    /\\  /\\    /\\    /\\           ",
+        "    /##\\  /##\\/##\\  /##\\  /##\\          ",
+        "   /####\\/########\\/####\\/####\\         ",
+        "   /####\\/##/\\####\\/##/\\##/\\##\\         ",
+        "    |##|  |##||##|  |##|  |##|          ",
+        "    |##|  |##||##|  |##|  |##|          ",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~~~~~          ",
+        "       shadows move in the trees        ",
+      ],
+    },
+    river: {
+      colour: 'cyan',
+      rows: [
+        "       THE ENCHANTED RIVER               ",
+        "                                        ",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~         ",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~         ",
+        "   ~~~   ~~~~   ~~~~~~   ~~~~~          ",
+        "    ~~~~     ~~~~   ~~~~~~             ",
+        "       ~~~~~~~~~~~~~~~~~~              ",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~~~~~         ",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~        ",
+        "                                        ",
+        "    stepping stones glimmer below       ",
+      ],
+    },
+    mountainPath: {
+      colour: 'white',
+      rows: [
+        "         THE MOUNTAIN PATH               ",
+        "                                        ",
+        "               /\\                       ",
+        "              /##\\                      ",
+        "             /####\\                     ",
+        "            /######\\                    ",
+        "           /########\\                   ",
+        "          /##########\\                  ",
+        "         /############\\                 ",
+        "        /##############\\                ",
+        "     __/________________\\__             ",
+        "       winding path goes up             ",
+      ],
+    },
+    cottage: {
+      colour: 'magenta',
+      rows: [
+        "        THE WITCH'S COTTAGE              ",
+        "                                        ",
+        "              /\\                        ",
+        "             /##\\                       ",
+        "            /####\\                      ",
+        "           /######\\                     ",
+        "          /________\\                    ",
+        "          |  ||  ||                     ",
+        "          |  ||  ||  * *                ",
+        "          |__||__||                     ",
+        "          |########|                    ",
+        "          |###||###|                    ",
+        "          |_####_##|                    ",
+        "    smoke curls from the chimney        ",
+      ],
+    },
+    crystalCave: {
+      colour: 'cyan',
+      rows: [
+        "        THE CRYSTAL CAVE                 ",
+        "                                        ",
+        "     /\\    /\\      /\\    /\\   /\\        ",
+        "    /##\\  /##\\    /##\\  /##\\ /##\\       ",
+        "   /####\\/####\\  /####\\/####X####\\      ",
+        "   ##############################       ",
+        "   ###  <>  ##  <>  ##  <>  <>###       ",
+        "   ## <>  <>  ##  <>  ##  <>  ##        ",
+        "   ###  <>  <>  <>  <>  <>  <>##        ",
+        "   ##############################       ",
+        "       crystals glitter softly          ",
+      ],
+    },
+    castleRuins: {
+      colour: 'red',
+      rows: [
+        "        THE CASTLE RUINS                 ",
+        "                                        ",
+        "    |\\ /\\  |\\  /\\  /\\  /\\ /|             ",
+        "    | V  \\ | \\/  \\/  \\/ |V |            ",
+        "    |######|########|####|             ",
+        "    |#  ##  ###  ###  ##  #|            ",
+        "    |##  ##  _  ##  _  ## #|            ",
+        "    |#####| | |####| | |###|            ",
+        "    |#####|_|_|####|_|_|###|            ",
+        "    |##########################         ",
+        "    ~~~~~~~~~~~~~~~~~~~~~~~~~~          ",
+        "     an iron gate stands barred         ",
+      ],
+    },
+    throneRoom: {
+      colour: 'yellow',
+      rows: [
+        "         THE THRONE ROOM                 ",
+        "                                        ",
+        "     /\\/\\/\\  /\\/\\/\\  /\\/\\/\\             ",
+        "    /######\\/######\\/######\\            ",
+        "    |######||######||######|            ",
+        "    |###__#||##__##||#__###|            ",
+        "    |##|##||###()#||#(##)##|            ",
+        "    |##|##||#|##|##||#|##|##|           ",
+        "    |_____||_____||_____|               ",
+        "   =======================              ",
+        "      the king and queen rejoice        ",
+      ],
+    },
+  };
+
+  /**
+   * Render the block art for a location into #art-area.
+   * Art is simply plain-text rows; we set the colour of the whole
+   * container from the location's teletext colour.
+   */
+  GG.renderArt = function (key) {
+    const art = GG.ART[key];
+    const area = document.getElementById('art-area');
+    area.innerHTML = '';
+    if (!art) return;
+    const wrap = document.createElement('pre');
+    wrap.className = 'tt-art';
+    wrap.textContent = art.rows.join('\n');
+    wrap.style.color = GG.TELETEXT_COLORS[art.colour] || GG.TELETEXT_COLORS.white;
+    area.appendChild(wrap);
+  };
+
   // --- Locations & navigation ------------------------------------------
   GG.LOCATIONS = {
     gardenGate: {
@@ -452,6 +647,9 @@
     const loc = GG.LOCATIONS[key];
     if (!loc) throw new Error('unknown location: ' + key);
     GG.goTo(key);
+
+    // Scene art
+    GG.renderArt(key);
 
     // Header (inside the status area until task 10 gives us a dedicated bar)
     const status = document.getElementById('status-area');

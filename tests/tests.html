@@ -372,6 +372,82 @@
     }
   });
 
+  // ============================================================
+  // Task 4: Teletext Block Art Tests
+  // ============================================================
+
+  test('GG.ART has entries for all 9 locations', ({ GG }) => {
+    assert(GG.ART, 'GG.ART should exist');
+    const expected = [
+      'castleRuins', 'cottage', 'crossroads', 'crystalCave', 'forest',
+      'gardenGate', 'mountainPath', 'river', 'throneRoom'
+    ].sort();
+    assertEq(Object.keys(GG.ART).sort(), expected, 'art keys');
+  });
+
+  test('each art entry has rows and a colour', ({ GG }) => {
+    for (const [key, art] of Object.entries(GG.ART)) {
+      assert(Array.isArray(art.rows), `${key} needs rows array`);
+      assert(art.rows.length >= 8 && art.rows.length <= 20,
+        `${key} rows should be 8-20, got ${art.rows.length}`);
+      assert(art.colour && GG.TELETEXT_COLORS[art.colour],
+        `${key} needs a teletext colour, got "${art.colour}"`);
+    }
+  });
+
+  test('art uses only block/box/ASCII characters (teletext-safe)', ({ GG }) => {
+    // Teletext art should only use a limited set: space, box drawing,
+    // block characters, punctuation, letters for labels.
+    const allowed = /^[\s\u2500-\u257F\u2580-\u259F\u25A0-\u25FF\u2600-\u26FFa-zA-Z0-9!@#$%\^&*()\-_=+\[\]{};:'",.<>/?\\|`~]*$/;
+    for (const [key, art] of Object.entries(GG.ART)) {
+      for (const row of art.rows) {
+        assert(allowed.test(row),
+          `${key} row contains unsupported characters: "${row}"`);
+      }
+    }
+  });
+
+  test('renderArt draws art into #art-area', async ({ GG, doc }) => {
+    assert(typeof GG.renderArt === 'function', 'GG.renderArt should be a function');
+    GG.renderArt('gardenGate');
+    const art = doc.getElementById('art-area');
+    // Art area should contain the art container
+    const container = art.querySelector('.tt-art');
+    assert(container, '.tt-art container should be rendered');
+    // Should contain at least some content
+    assert(container.textContent.trim().length > 0,
+      'rendered art should have content');
+  });
+
+  test('renderArt applies the art colour', async ({ GG, doc, win }) => {
+    GG.renderArt('forest');
+    const container = doc.querySelector('#art-area .tt-art');
+    const colour = win.getComputedStyle(container).color;
+    // forest should be green (0,255,0) — check colour components
+    assert(/rgb\(\s*0\s*,\s*255\s*,\s*0\s*\)/i.test(colour),
+      `forest art should render in green, got ${colour}`);
+  });
+
+  test('renderLocation automatically renders art', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('river');
+    const container = doc.querySelector('#art-area .tt-art');
+    assert(container, 'renderLocation should call renderArt');
+  });
+
+  test('each location name appears in its own art (label)', ({ GG }) => {
+    // Titles help identify the scene even if art is abstract.
+    for (const [key, art] of Object.entries(GG.ART)) {
+      // either the art itself contains a label OR there's a title field
+      const combined = art.rows.join('\n').toLowerCase();
+      const words = GG.LOCATIONS[key].name.toLowerCase()
+        .replace(/[^a-z ]/g, '').split(/\s+/).filter(w => w.length > 3);
+      const hasWord = words.some(w => combined.includes(w));
+      assert(hasWord || art.title,
+        `${key}: art should include part of the location name or a title`);
+    }
+  });
+
   runAll();
 </script>
 </body>
