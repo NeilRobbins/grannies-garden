@@ -528,6 +528,141 @@
       'fully-rescued hint should differ');
   });
 
+  // ============================================================
+  // Task 6: Puzzle Engine Tests
+  // ============================================================
+
+  test('GG.PUZZLE_TYPES lists all 6 puzzle types', ({ GG }) => {
+    assert(Array.isArray(GG.PUZZLE_TYPES), 'GG.PUZZLE_TYPES should be array');
+    const expected = ['riddle', 'word', 'maths', 'logic', 'sequence', 'memory'].sort();
+    assertEq(GG.PUZZLE_TYPES.slice().sort(), expected, 'puzzle type names');
+  });
+
+  test('GG.PUZZLES defines 2+ puzzles per rescuable child', ({ GG }) => {
+    assert(GG.PUZZLES, 'GG.PUZZLES should exist');
+    // 6 children, corresponding to forest, river, mountainPath, cottage, crystalCave, castleRuins
+    const rescueLocations = ['forest', 'river', 'mountainPath',
+                              'cottage', 'crystalCave', 'castleRuins'];
+    for (const loc of rescueLocations) {
+      const pool = GG.PUZZLES[loc];
+      assert(Array.isArray(pool), `puzzle pool for ${loc} should exist`);
+      assert(pool.length >= 2,
+        `${loc} should have at least 2 puzzles, got ${pool.length}`);
+    }
+  });
+
+  test('total puzzles across all children is >= 12', ({ GG }) => {
+    let total = 0;
+    for (const pool of Object.values(GG.PUZZLES)) total += pool.length;
+    assert(total >= 12, `should have >= 12 puzzles, got ${total}`);
+  });
+
+  test('every puzzle has a type, question, answer, and choices (if applicable)', ({ GG }) => {
+    for (const [loc, pool] of Object.entries(GG.PUZZLES)) {
+      for (const p of pool) {
+        assert(GG.PUZZLE_TYPES.includes(p.type),
+          `${loc}: invalid type "${p.type}"`);
+        assert(typeof p.question === 'string' && p.question.length > 0,
+          `${loc}/${p.type}: missing question`);
+        assert(p.answer != null,
+          `${loc}/${p.type}: missing answer`);
+        // Riddle/logic/sequence should have choices
+        if (['riddle', 'logic', 'sequence'].includes(p.type)) {
+          assert(Array.isArray(p.choices) && p.choices.length >= 2,
+            `${loc}/${p.type}: needs choices array`);
+          assert(p.choices.includes(p.answer),
+            `${loc}/${p.type}: answer must be in choices`);
+        }
+      }
+    }
+  });
+
+  test('GG.pickPuzzle(loc) returns a puzzle from that pool', ({ GG }) => {
+    GG.newGame();
+    const p = GG.pickPuzzle('forest');
+    assert(p && p.type, 'should return a puzzle');
+    assert(GG.PUZZLES.forest.includes(p), 'should come from forest pool');
+  });
+
+  test('pickPuzzle is deterministic per game seed', ({ GG }) => {
+    GG.newGame(12345);     // seeded
+    const a = GG.pickPuzzle('forest');
+    GG.newGame(12345);
+    const b = GG.pickPuzzle('forest');
+    assertEq(a.question, b.question, 'same seed -> same puzzle');
+  });
+
+  test('pickPuzzle varies across seeds (replayability)', ({ GG }) => {
+    // Some seeds should give different puzzles. Try several.
+    const seen = new Set();
+    for (let i = 0; i < 20; i++) {
+      GG.newGame(i);
+      seen.add(GG.pickPuzzle('river').question);
+    }
+    assert(seen.size > 1, 'at least 2 different river puzzles across seeds');
+  });
+
+  test('renderPuzzle shows question in text-area and choices in menu-area', async ({ GG, doc }) => {
+    GG.newGame(42);
+    const puzzle = { type: 'riddle', question: 'Q?', answer: 'A',
+                     choices: ['A', 'B', 'C'] };
+    await GG.renderPuzzle(puzzle);
+    const text = doc.getElementById('text-area').textContent;
+    assert(text.includes('Q?'), 'question should be in text area');
+    const choices = doc.querySelectorAll('[data-puzzle-choice]');
+    assertEq(choices.length, 3, 'three choice buttons');
+  });
+
+  test('answerPuzzle(correct) returns true and increments solved count', ({ GG }) => {
+    GG.newGame(1);
+    const puzzle = { type: 'riddle', question: 'Q?', answer: 'cat',
+                     choices: ['cat', 'dog'] };
+    const ok = GG.answerPuzzle(puzzle, 'cat');
+    assertEq(ok, true, 'correct answer');
+    assertEq(GG.state.stats.puzzlesSolved, 1, 'stat incremented');
+  });
+
+  test('answerPuzzle(wrong) returns false and does not increment', ({ GG }) => {
+    GG.newGame(1);
+    const puzzle = { type: 'riddle', question: 'Q?', answer: 'cat',
+                     choices: ['cat', 'dog'] };
+    const ok = GG.answerPuzzle(puzzle, 'dog');
+    assertEq(ok, false, 'wrong answer');
+    assertEq(GG.state.stats.puzzlesSolved, 0, 'stat not incremented');
+  });
+
+  test('rescueChild marks a child rescued', ({ GG }) => {
+    GG.newGame();
+    GG.rescueChild('forest');
+    assert(GG.state.rescued.includes('forest'), 'forest child rescued');
+    assertEq(GG.state.rescued.length, 1, 'only one child rescued so far');
+  });
+
+  test('rescueChild is idempotent', ({ GG }) => {
+    GG.newGame();
+    GG.rescueChild('forest');
+    GG.rescueChild('forest');
+    assertEq(GG.state.rescued.length, 1, 'no double-rescue');
+  });
+
+  test('maths puzzle validates numeric answer string-insensitively', ({ GG }) => {
+    GG.newGame();
+    const p = { type: 'maths', question: '2+2?', answer: 4, choices: [] };
+    assertEq(GG.answerPuzzle(p, '4'), true, 'string "4" matches numeric 4');
+    GG.newGame();
+    assertEq(GG.answerPuzzle(p, 4), true, 'numeric 4 matches');
+  });
+
+  test('word puzzle accepts case-insensitive answer', ({ GG }) => {
+    GG.newGame();
+    const p = { type: 'word', question: 'scramble: tac', answer: 'cat' };
+    assertEq(GG.answerPuzzle(p, 'CAT'), true);
+    GG.newGame();
+    assertEq(GG.answerPuzzle(p, 'Cat'), true);
+    GG.newGame();
+    assertEq(GG.answerPuzzle(p, 'dog'), false);
+  });
+
   runAll();
 </script>
 </body>
