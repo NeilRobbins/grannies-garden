@@ -1012,6 +1012,107 @@
     assertEq(GG.Audio.muted, false);
   });
 
+  // ============================================================
+  // Task 10: Progress, Victory & Statistics Tests
+  // ============================================================
+
+  test('newGame records startedAt timestamp', ({ GG }) => {
+    const before = Date.now();
+    GG.newGame(1);
+    const after = Date.now();
+    assert(typeof GG.state.startedAt === 'number',
+      'startedAt is a number');
+    assert(GG.state.startedAt >= before && GG.state.startedAt <= after,
+      'startedAt is a reasonable timestamp');
+  });
+
+  test('GG.isVictory false when no children rescued', ({ GG }) => {
+    GG.newGame(1);
+    assertEq(GG.isVictory(), false);
+  });
+
+  test('GG.isVictory false with partial rescue', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.rescued = ['forest', 'river', 'mountainPath'];
+    assertEq(GG.isVictory(), false);
+  });
+
+  test('GG.isVictory true when all 6 children rescued', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.rescued = ['forest', 'river', 'mountainPath',
+                        'cottage', 'crystalCave', 'castleRuins'];
+    assertEq(GG.isVictory(), true);
+  });
+
+  test('GG.RESCUE_LOCATIONS lists the 6 puzzle locations', ({ GG }) => {
+    assert(Array.isArray(GG.RESCUE_LOCATIONS));
+    assertEq(GG.RESCUE_LOCATIONS.length, 6);
+  });
+
+  test('GG.elapsedMs returns ms since newGame', ({ GG }) => {
+    GG.newGame(1);
+    const e1 = GG.elapsedMs();
+    assert(e1 >= 0 && e1 < 1000, `recent game: ${e1}ms`);
+  });
+
+  test('GG.formatElapsed returns mm:ss string', ({ GG }) => {
+    assertEq(GG.formatElapsed(0), '00:00');
+    assertEq(GG.formatElapsed(65000), '01:05');
+    assertEq(GG.formatElapsed(3599000), '59:59');
+  });
+
+  test('renderVictory draws fanfare screen with stats', async ({ GG, doc }) => {
+    GG.newGame(1);
+    GG.state.rescued = ['forest', 'river', 'mountainPath',
+                        'cottage', 'crystalCave', 'castleRuins'];
+    GG.state.stats.puzzlesSolved = 7;
+    GG.state.stats.witchEncounters = 3;
+    GG.state.stats.itemsFound = 4;
+    await GG.renderVictory();
+    const text = doc.getElementById('text-area').textContent;
+    assert(/victory|rescued|saved|done|hooray|bravo/i.test(text),
+      'victory text includes a celebratory word');
+    // Stats visible somewhere in the display panel
+    const panel = doc.getElementById('display-panel').textContent;
+    assert(panel.includes('7'), 'puzzles-solved stat shown');
+    assert(panel.includes('3'), 'witch-encounters stat shown');
+    assert(panel.includes('4'), 'items-found stat shown');
+  });
+
+  test('renderVictory shows replay seed so players can share', async ({ GG, doc }) => {
+    GG.newGame(424242);
+    GG.state.rescued = ['forest', 'river', 'mountainPath',
+                        'cottage', 'crystalCave', 'castleRuins'];
+    await GG.renderVictory();
+    const panel = doc.getElementById('display-panel').textContent;
+    assert(panel.includes('424242'), 'seed shown on victory screen');
+  });
+
+  test('renderVictory offers restart option in menu', async ({ GG, doc }) => {
+    GG.newGame(1);
+    GG.state.rescued = ['forest', 'river', 'mountainPath',
+                        'cottage', 'crystalCave', 'castleRuins'];
+    await GG.renderVictory();
+    const menu = doc.getElementById('menu-area').textContent.toLowerCase();
+    assert(/play again|restart|new game/.test(menu),
+      'menu offers a restart');
+  });
+
+  test('GG.gameOver flag can be set and cleared', ({ GG }) => {
+    GG.newGame(1);
+    assertEq(!!GG.state.gameOver, false);
+    GG.state.gameOver = true;
+    assertEq(GG.state.gameOver, true);
+  });
+
+  test('rescueChild triggers victory when the last child is saved', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.rescued = ['forest', 'river', 'mountainPath',
+                        'cottage', 'crystalCave'];
+    GG.rescueChild('castleRuins');
+    assertEq(GG.isVictory(), true);
+  });
+
   runAll();
 </script>
 </body>

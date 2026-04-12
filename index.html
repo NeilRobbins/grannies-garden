@@ -696,6 +696,88 @@
     }
   };
 
+  // --- Progress, victory & stats ---------------------------------------
+  GG.RESCUE_LOCATIONS = [
+    'forest', 'river', 'mountainPath',
+    'cottage', 'crystalCave', 'castleRuins',
+  ];
+
+  GG.isVictory = function () {
+    if (!GG.state || !Array.isArray(GG.state.rescued)) return false;
+    return GG.RESCUE_LOCATIONS.every(k => GG.state.rescued.includes(k));
+  };
+
+  GG.elapsedMs = function () {
+    if (!GG.state || !GG.state.startedAt) return 0;
+    return Date.now() - GG.state.startedAt;
+  };
+
+  GG.formatElapsed = function (ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    const pad = n => (n < 10 ? '0' + n : '' + n);
+    return pad(m) + ':' + pad(s);
+  };
+
+  GG.renderVictory = async function () {
+    if (!GG.state) return;
+    GG.state.gameOver = true;
+    if (GG.Audio && GG.Audio.victory) GG.Audio.victory();
+
+    const art = document.getElementById('art-area');
+    const text = document.getElementById('text-area');
+    const menu = document.getElementById('menu-area');
+    const status = document.getElementById('status-area');
+
+    if (art) {
+      art.innerHTML = '';
+      const lines = [
+        '    *  \u2605  *  \u2605  *  \u2605  *',
+        '   \u2605  HOORAY! GRANNY SMILES  \u2605',
+        '    *  \u2605  *  \u2605  *  \u2605  *',
+      ];
+      for (const l of lines) {
+        const row = document.createElement('div');
+        row.textContent = l;
+        row.style.color = 'var(--tt-yellow)';
+        art.appendChild(row);
+      }
+    }
+
+    if (text) {
+      text.textContent = '';
+      await GG.typewriter(text,
+        'VICTORY! All six children are safely home. Granny hugs you tight. ' +
+        'The Kingdom of the Mountains is saved!');
+    }
+
+    const elapsed = GG.formatElapsed(GG.elapsedMs());
+    const s = GG.state.stats || {};
+    if (status) {
+      status.textContent =
+        'Time ' + elapsed +
+        '  Puzzles ' + (s.puzzlesSolved || 0) +
+        '  Witch ' + (s.witchEncounters || 0) +
+        '  Items ' + (s.itemsFound || 0) +
+        '  Seed ' + GG.state.seed;
+    }
+
+    if (menu) {
+      menu.innerHTML = '';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = '1. Play again';
+      btn.setAttribute('data-menu-choice', 'restart');
+      btn.setAttribute('aria-label', 'Play again');
+      btn.addEventListener('click', () => {
+        GG.newGame();
+        GG.renderLocation('gardenGate');
+      });
+      menu.appendChild(btn);
+    }
+  };
+
   // --- Wicked Witch system ---------------------------------------------
   GG.WITCH = {
     encounterRate: 0.20,                // 20% chance per dangerous location
@@ -1256,10 +1338,12 @@
     GG.state = {
       seed: seed,
       rng: makeRng(seed),
+      startedAt: Date.now(),
       currentLocation: 'gardenGate',
       visited: {},
       rescued: [],            // filled by puzzle system
       inventory: [],          // filled by inventory system
+      gameOver: false,
       stats: { puzzlesSolved: 0, witchEncounters: 0, itemsFound: 0 },
     };
     return GG.state;
