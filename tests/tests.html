@@ -912,6 +912,106 @@
     assert(hasLocation >= 3, 'several items should be placed in the world');
   });
 
+  // ============================================================
+  // Task 9: Audio System Tests (Web Audio API)
+  // ============================================================
+
+  test('GG.Audio namespace exists', ({ GG }) => {
+    assert(GG.Audio, 'GG.Audio should exist');
+    assert(typeof GG.Audio.init === 'function', 'init()');
+    assert(typeof GG.Audio.blip === 'function', 'blip()');
+    assert(typeof GG.Audio.success === 'function', 'success()');
+    assert(typeof GG.Audio.fail === 'function', 'fail()');
+    assert(typeof GG.Audio.witch === 'function', 'witch()');
+    assert(typeof GG.Audio.victory === 'function', 'victory()');
+    assert(typeof GG.Audio.menu === 'function', 'menu()');
+    assert(typeof GG.Audio.setMuted === 'function', 'setMuted()');
+  });
+
+  test('GG.Audio starts unmuted', ({ GG }) => {
+    assertEq(GG.Audio.muted, false, 'unmuted by default');
+  });
+
+  test('setMuted toggles mute state', ({ GG }) => {
+    GG.Audio.setMuted(true);
+    assertEq(GG.Audio.muted, true);
+    GG.Audio.setMuted(false);
+    assertEq(GG.Audio.muted, false);
+  });
+
+  test('Audio calls are safe with no context (no-throw)', ({ GG }) => {
+    // Before init, calls should no-op silently, not throw.
+    GG.Audio.blip();
+    GG.Audio.success();
+    GG.Audio.fail();
+    GG.Audio.witch();
+    GG.Audio.victory();
+    GG.Audio.menu();
+    assert(true, 'no throws');
+  });
+
+  test('Audio.init creates an AudioContext (or is safely no-op)', ({ GG, win }) => {
+    // If the host supports Web Audio, init should succeed.
+    if (typeof win.AudioContext === 'function' ||
+        typeof win.webkitAudioContext === 'function') {
+      GG.Audio.init();
+      assert(GG.Audio.ctx, 'context created');
+    } else {
+      GG.Audio.init();
+      assert(true, 'no throw without Web Audio');
+    }
+  });
+
+  test('Audio calls are safe after init (no-throw)', ({ GG }) => {
+    GG.Audio.init();
+    GG.Audio.blip();
+    GG.Audio.success();
+    GG.Audio.fail();
+    GG.Audio.witch();
+    GG.Audio.victory();
+    GG.Audio.menu();
+    assert(true, 'no throws');
+  });
+
+  test('muting silences audio output (calls still safe)', ({ GG }) => {
+    GG.Audio.init();
+    GG.Audio.setMuted(true);
+    GG.Audio.blip();
+    GG.Audio.success();
+    GG.Audio.setMuted(false);
+    assert(true, 'no throws while muted');
+  });
+
+  test('GG.blip callback wires typewriter to Audio.blip', async ({ GG, doc }) => {
+    // When audio is enabled, GG.blip should invoke GG.Audio.blip. Stub it.
+    let count = 0;
+    const real = GG.Audio.blip;
+    GG.Audio.blip = function () { count++; };
+    try {
+      const el = doc.createElement('div');
+      doc.body.appendChild(el);
+      await GG.typewriter(el, 'hello', 1);
+      assert(count >= 1, 'Audio.blip was called during typewriter');
+      el.remove();
+    } finally {
+      GG.Audio.blip = real;
+    }
+  });
+
+  test('Audio mute button exists in the UI', ({ doc }) => {
+    const btn = doc.getElementById('mute-toggle');
+    assert(btn, 'mute button exists');
+  });
+
+  test('clicking mute button flips Audio.muted', ({ GG, doc }) => {
+    const btn = doc.getElementById('mute-toggle');
+    GG.Audio.setMuted(false);
+    btn.click();
+    assertEq(GG.Audio.muted, true);
+    btn.click();
+    assertEq(GG.Audio.muted, false);
+  });
+
   runAll();
 </script>
 </body>

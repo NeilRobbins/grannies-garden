@@ -313,8 +313,122 @@
     document.body.classList.toggle('crt-off');
   };
 
-  // --- Audio stubs (Task 9 fills these in) -----------------------------
-  GG.blip = function () { /* replaced in task 9 */ };
+  // --- Audio system (Web Audio API) ------------------------------------
+  GG.Audio = {
+    ctx: null,
+    muted: false,
+    _master: null,
+
+    init: function () {
+      if (this.ctx) return this.ctx;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (typeof AC !== 'function') return null;
+      try {
+        this.ctx = new AC();
+        this._master = this.ctx.createGain();
+        this._master.gain.value = this.muted ? 0 : 0.15;
+        this._master.connect(this.ctx.destination);
+      } catch (_) {
+        this.ctx = null;
+      }
+      return this.ctx;
+    },
+
+    setMuted: function (flag) {
+      this.muted = !!flag;
+      if (this._master) this._master.gain.value = this.muted ? 0 : 0.15;
+      const btn = document.getElementById('mute-toggle');
+      if (btn) btn.textContent = this.muted ? '\u266A\u0338' : '\u266A';
+    },
+
+    // --- Primitives ---
+    _tone: function (freq, durMs, type, vol) {
+      if (!this.ctx || this.muted) return;
+      try {
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        osc.type = type || 'square';
+        osc.frequency.value = freq;
+        const dur = durMs / 1000;
+        const v = vol == null ? 0.5 : vol;
+        g.gain.setValueAtTime(0, now);
+        g.gain.linearRampToValueAtTime(v, now + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+        osc.connect(g).connect(this._master);
+        osc.start(now);
+        osc.stop(now + dur + 0.02);
+      } catch (_) { /* ignore */ }
+    },
+
+    _noise: function (durMs, vol) {
+      if (!this.ctx || this.muted) return;
+      try {
+        const frames = Math.max(1, Math.floor(this.ctx.sampleRate * durMs / 1000));
+        const buf = this.ctx.createBuffer(1, frames, this.ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < frames; i++) data[i] = (Math.random() * 2 - 1);
+        const src = this.ctx.createBufferSource();
+        src.buffer = buf;
+        const g = this.ctx.createGain();
+        g.gain.value = vol == null ? 0.3 : vol;
+        src.connect(g).connect(this._master);
+        src.start();
+      } catch (_) { /* ignore */ }
+    },
+
+    // --- Voice effects ---
+    blip: function () {
+      // Short, quiet chirp used by the typewriter.
+      this._tone(520 + (Math.random() * 120 | 0), 18, 'square', 0.2);
+    },
+
+    menu: function () {
+      this._tone(880, 60, 'triangle', 0.4);
+    },
+
+    success: function () {
+      // Rising major arpeggio.
+      const t = (this.ctx && this.ctx.currentTime) || 0;
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      notes.forEach((f, i) => {
+        setTimeout(() => this._tone(f, 120, 'triangle', 0.4), i * 90);
+      });
+    },
+
+    fail: function () {
+      // Falling minor second.
+      this._tone(220, 180, 'sawtooth', 0.4);
+      setTimeout(() => this._tone(174.6, 260, 'sawtooth', 0.4), 150);
+    },
+
+    witch: function () {
+      // Shriek: dissonant pair + noise gust.
+      this._tone(1200, 280, 'square', 0.35);
+      this._tone(980, 320, 'sawtooth', 0.25);
+      this._noise(420, 0.18);
+    },
+
+    victory: function () {
+      // Little fanfare.
+      const pattern = [
+        [523.25, 140], [659.25, 140], [783.99, 140],
+        [1046.5, 220], [783.99, 120], [1046.5, 320],
+      ];
+      let t = 0;
+      for (const [f, d] of pattern) {
+        const dd = d;
+        setTimeout(() => this._tone(f, dd, 'triangle', 0.45), t);
+        t += d * 0.9;
+      }
+    },
+  };
+
+  // Typewriter per-char callback routes to Audio.blip (so tests can
+  // still stub GG.blip directly, and the audio layer stays swappable).
+  GG.blip = function () {
+    if (GG.Audio && typeof GG.Audio.blip === 'function') GG.Audio.blip();
+  };
 
   // --- Typewriter text animation ---------------------------------------
   GG.DEFAULT_TYPEWRITER_SPEED = 28;   // ms per character (feels BBC-ish)
@@ -326,9 +440,15 @@
    * Options: { speed, onChar, clear }
    */
   GG.typewriter = function (target, text, opts) {
+    // Back-compat: a number in place of opts is a speed value.
+    if (typeof opts === 'number') opts = { speed: opts };
     opts = opts || {};
     const speed  = opts.speed  != null ? opts.speed  : GG.DEFAULT_TYPEWRITER_SPEED;
-    const onChar = opts.onChar || null;
+    // If no explicit per-char hook is supplied, default to GG.blip so the
+    // audio layer (and tests) automatically hear the typewriter.
+    const onChar = opts.onChar !== undefined
+                     ? opts.onChar
+                     : (typeof GG.blip === 'function' ? GG.blip : null);
     const clear  = opts.clear !== false;   // default true
 
     // Cancel any previous animation cleanly.
@@ -1235,6 +1355,22 @@
   // --- Bootstrap --------------------------------------------------------
   function boot() {
     document.getElementById('crt-toggle').addEventListener('click', GG.toggleCRT);
+
+    const muteBtn = document.getElementById('mute-toggle');
+    if (muteBtn) {
+      muteBtn.addEventListener('click', () => {
+        GG.Audio.init();                    // user gesture unlocks audio
+        GG.Audio.setMuted(!GG.Audio.muted);
+      });
+    }
+    // Lazy-init the audio context on the first user interaction.
+    const unlock = () => {
+      GG.Audio.init();
+      document.removeEventListener('click', unlock);
+      document.removeEventListener('keydown', unlock);
+    };
+    document.addEventListener('click', unlock);
+    document.addEventListener('keydown', unlock);
 
     // Skip typewriter on click anywhere in the panel or on Space key.
     const panel = document.getElementById('display-panel');
