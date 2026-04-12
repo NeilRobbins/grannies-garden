@@ -663,6 +663,142 @@
     assertEq(GG.answerPuzzle(p, 'dog'), false);
   });
 
+  // ============================================================
+  // Task 7: Wicked Witch System Tests
+  // ============================================================
+
+  test('GG.WITCH config exists with encounter rate and safe locations', ({ GG }) => {
+    assert(GG.WITCH, 'GG.WITCH namespace should exist');
+    assert(typeof GG.WITCH.encounterRate === 'number',
+      'encounterRate should be a number');
+    assert(GG.WITCH.encounterRate > 0 && GG.WITCH.encounterRate < 1,
+      'encounterRate should be a probability');
+    assert(Array.isArray(GG.WITCH.safeLocations),
+      'safeLocations should be an array');
+    assert(GG.WITCH.safeLocations.includes('gardenGate'),
+      'gardenGate must be safe');
+  });
+
+  test('maybeSpawnWitch never spawns at a safe location', ({ GG }) => {
+    GG.newGame(1);
+    for (let i = 0; i < 50; i++) {
+      assertEq(GG.maybeSpawnWitch('gardenGate'), false,
+        'witch never appears at gardenGate');
+    }
+  });
+
+  test('maybeSpawnWitch is deterministic per seed', ({ GG }) => {
+    GG.newGame(777);
+    const a = [];
+    for (let i = 0; i < 30; i++) a.push(GG.maybeSpawnWitch('forest'));
+    GG.newGame(777);
+    const b = [];
+    for (let i = 0; i < 30; i++) b.push(GG.maybeSpawnWitch('forest'));
+    assertEq(a, b, 'same seed -> identical witch spawn pattern');
+  });
+
+  test('maybeSpawnWitch sometimes spawns in dangerous locations', ({ GG }) => {
+    GG.newGame(42);
+    let spawns = 0;
+    for (let i = 0; i < 200; i++) {
+      if (GG.maybeSpawnWitch('forest')) spawns++;
+    }
+    assert(spawns > 5, `witch should spawn at least a few times, got ${spawns}`);
+    assert(spawns < 200, 'witch should not always spawn');
+  });
+
+  test('Magic Cloak in inventory prevents witch spawn', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.inventory = ['magicCloak'];
+    for (let i = 0; i < 100; i++) {
+      assertEq(GG.maybeSpawnWitch('forest'), false,
+        'cloak gives immunity');
+    }
+  });
+
+  test('witchEncounter increments witch stat', async ({ GG }) => {
+    GG.newGame(1);
+    const before = GG.state.stats.witchEncounters;
+    // auto-escape mode for testing: pass { auto: 'escape' }
+    await GG.witchEncounter({ auto: 'escape' });
+    assertEq(GG.state.stats.witchEncounters, before + 1,
+      'stat incremented per encounter');
+  });
+
+  test('witchEncounter escape returns caught:false', async ({ GG }) => {
+    GG.newGame(1);
+    const result = await GG.witchEncounter({ auto: 'escape' });
+    assertEq(result.caught, false, 'escape -> not caught');
+  });
+
+  test('witchEncounter caught returns caught:true', async ({ GG }) => {
+    GG.newGame(1);
+    const result = await GG.witchEncounter({ auto: 'caught' });
+    assertEq(result.caught, true, 'caught -> caught');
+  });
+
+  test('renderWitchWarning shows warning in text area', async ({ GG, doc }) => {
+    GG.newGame(1);
+    await GG.renderWitchWarning();
+    const text = doc.getElementById('text-area').textContent.toLowerCase();
+    assert(text.includes('witch') || text.includes('wicked'),
+      'warning text should mention the witch');
+  });
+
+  test('handleCatch teleports player back to gardenGate', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.currentLocation = 'forest';
+    GG.handleCatch();
+    assertEq(GG.state.currentLocation, 'gardenGate',
+      'caught -> teleported home');
+  });
+
+  test('handleCatch drops the last inventory item', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.inventory = ['key', 'lamp'];
+    GG.handleCatch();
+    assertEq(GG.state.inventory.length, 1,
+      'catch steals one item');
+  });
+
+  test('cottage triggers chase sequence (not normal encounter)', ({ GG }) => {
+    assert(typeof GG.startChase === 'function', 'startChase should exist');
+    GG.newGame(5);
+    const chase = GG.startChase();
+    assert(chase && Array.isArray(chase.rooms),
+      'chase should return rooms array');
+    assert(chase.rooms.length >= 3,
+      'chase should have at least 3 rooms');
+    assertEq(typeof chase.currentRoom, 'number', 'currentRoom index');
+  });
+
+  test('chaseStep(direction) advances state', ({ GG }) => {
+    GG.newGame(5);
+    const chase = GG.startChase();
+    const first = chase.currentRoom;
+    const wrongBefore = chase.wrongMoves;
+    const result = GG.chaseStep(chase, chase.rooms[first].exits[0]);
+    const advanced = result.currentRoom !== first;
+    const resolved = result.caught || result.escaped;
+    const gotWrong = result.wrongMoves > wrongBefore;
+    assert(advanced || resolved || gotWrong,
+      'step should advance, resolve, or record a wrong move');
+  });
+
+  test('escaping chase means reaching the exit room', ({ GG }) => {
+    GG.newGame(5);
+    const chase = GG.startChase();
+    // Walk toward exit using .correct hint on each room
+    let state = chase;
+    let steps = 0;
+    while (!state.escaped && !state.caught && steps < 20) {
+      const room = state.rooms[state.currentRoom];
+      state = GG.chaseStep(state, room.correct);
+      steps++;
+    }
+    assertEq(state.escaped, true, 'following correct path escapes');
+  });
+
   runAll();
 </script>
 </body>

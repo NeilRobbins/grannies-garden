@@ -576,6 +576,139 @@
     }
   };
 
+  // --- Wicked Witch system ---------------------------------------------
+  GG.WITCH = {
+    encounterRate: 0.20,                // 20% chance per dangerous location
+    safeLocations: ['gardenGate'],      // where the witch cannot reach
+    // Cottage uses a chase sequence rather than a regular encounter.
+    chaseLocation: 'cottage',
+  };
+
+  /**
+   * Roll against the seeded RNG to decide whether the witch spawns here.
+   * Always false at safe locations or when the Magic Cloak is carried.
+   */
+  GG.maybeSpawnWitch = function (locKey) {
+    if (!GG.state) return false;
+    if (GG.WITCH.safeLocations.includes(locKey)) return false;
+    if (GG.state.inventory && GG.state.inventory.includes('magicCloak')) {
+      return false;
+    }
+    const rnd = GG.state.rng || Math.random;
+    return rnd() < GG.WITCH.encounterRate;
+  };
+
+  /**
+   * Draw a warning screen announcing the witch. Keeps the art area clear
+   * (a future art pass can paint a witch silhouette here).
+   */
+  GG.renderWitchWarning = async function () {
+    const doc = document;
+    const text = doc.getElementById('text-area');
+    if (text) {
+      text.textContent = '';
+      await GG.typewriter(text,
+        "A shriek splits the air! The Wicked Witch cackles overhead, " +
+        "her cloak like a storm-cloud. She has seen you!",
+        GG.DEFAULT_TYPEWRITER_SPEED);
+    }
+    const menu = doc.getElementById('menu-area');
+    if (menu) {
+      menu.innerHTML = '';
+    }
+  };
+
+  /**
+   * Run a witch encounter. In production the player picks escape/hide/fight;
+   * tests pass { auto: 'escape' | 'caught' } to bypass interaction.
+   * Returns { caught: boolean }.
+   */
+  GG.witchEncounter = async function (opts) {
+    opts = opts || {};
+    if (GG.state && GG.state.stats) {
+      GG.state.stats.witchEncounters += 1;
+    }
+    await GG.renderWitchWarning();
+    if (opts.auto === 'escape') return { caught: false };
+    if (opts.auto === 'caught') {
+      GG.handleCatch();
+      return { caught: true };
+    }
+    // Default (no UI wired yet): 50/50 based on RNG.
+    const rnd = (GG.state && GG.state.rng) || Math.random;
+    if (rnd() < 0.5) return { caught: false };
+    GG.handleCatch();
+    return { caught: true };
+  };
+
+  /**
+   * Apply the catch penalty: teleport back to the garden gate and lose
+   * the most recently-picked-up item.
+   */
+  GG.handleCatch = function () {
+    if (!GG.state) return;
+    GG.state.currentLocation = 'gardenGate';
+    if (GG.state.inventory && GG.state.inventory.length > 0) {
+      GG.state.inventory.pop();
+    }
+  };
+
+  /**
+   * Build a chase sequence through the witch's cottage. Returns an
+   * immutable-ish state object; use GG.chaseStep to advance.
+   * Each room has { name, exits:[dir], correct:dir }; the final room's
+   * `correct` exit leads to escape.
+   */
+  GG.startChase = function () {
+    const rnd = (GG.state && GG.state.rng) || Math.random;
+    const dirs = ['north', 'south', 'east', 'west'];
+    const rooms = [];
+    const roomCount = 4;
+    for (let i = 0; i < roomCount; i++) {
+      // Shuffle exits deterministically per seed.
+      const exits = dirs.slice();
+      for (let j = exits.length - 1; j > 0; j--) {
+        const k = Math.floor(rnd() * (j + 1));
+        [exits[j], exits[k]] = [exits[k], exits[j]];
+      }
+      const correct = exits[Math.floor(rnd() * exits.length)];
+      rooms.push({
+        name: ['Kitchen', 'Pantry', 'Parlour', 'Hallway'][i] || ('Room ' + i),
+        exits: exits,
+        correct: correct,
+      });
+    }
+    return {
+      rooms: rooms,
+      currentRoom: 0,
+      escaped: false,
+      caught: false,
+      wrongMoves: 0,
+    };
+  };
+
+  /**
+   * Step through the chase. `direction` must match one of the current
+   * room's exits. Correct exits advance; wrong exits increase the
+   * wrongMoves counter; 3 wrong moves means caught.
+   */
+  GG.chaseStep = function (state, direction) {
+    if (state.escaped || state.caught) return state;
+    const room = state.rooms[state.currentRoom];
+    if (direction === room.correct) {
+      const next = state.currentRoom + 1;
+      if (next >= state.rooms.length) {
+        return Object.assign({}, state, { escaped: true });
+      }
+      return Object.assign({}, state, { currentRoom: next });
+    }
+    const wrong = state.wrongMoves + 1;
+    if (wrong >= 3) {
+      return Object.assign({}, state, { wrongMoves: wrong, caught: true });
+    }
+    return Object.assign({}, state, { wrongMoves: wrong });
+  };
+
   // --- Narrative text (first-visit / revisit) --------------------------
   GG.NARRATIVE = {
     gardenGate: {
