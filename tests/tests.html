@@ -799,6 +799,119 @@
     assertEq(state.escaped, true, 'following correct path escapes');
   });
 
+  // ============================================================
+  // Task 8: Inventory System Tests
+  // ============================================================
+
+  test('GG.ITEMS catalogue exists with id/name/description/icon', ({ GG }) => {
+    assert(GG.ITEMS, 'GG.ITEMS should exist');
+    const ids = Object.keys(GG.ITEMS);
+    assert(ids.length >= 5, 'at least 5 items defined');
+    for (const id of ids) {
+      const it = GG.ITEMS[id];
+      assert(typeof it.name === 'string' && it.name.length,
+        `${id}: name missing`);
+      assert(typeof it.description === 'string' && it.description.length,
+        `${id}: description missing`);
+      assert(typeof it.icon === 'string' && it.icon.length,
+        `${id}: icon missing`);
+    }
+  });
+
+  test('Magic Cloak is one of the items', ({ GG }) => {
+    assert(GG.ITEMS.magicCloak, 'magicCloak item defined');
+  });
+
+  test('GG.INVENTORY_LIMIT is 5', ({ GG }) => {
+    assertEq(GG.INVENTORY_LIMIT, 5, 'inventory limit 5');
+  });
+
+  test('addItem adds an item to the inventory', ({ GG }) => {
+    GG.newGame();
+    const ok = GG.addItem('key');
+    assertEq(ok, true, 'add succeeds');
+    assert(GG.state.inventory.includes('key'), 'key in inventory');
+  });
+
+  test('addItem refuses unknown items', ({ GG }) => {
+    GG.newGame();
+    const ok = GG.addItem('zzz-not-an-item');
+    assertEq(ok, false, 'unknown item rejected');
+    assertEq(GG.state.inventory.length, 0);
+  });
+
+  test('addItem respects INVENTORY_LIMIT', ({ GG }) => {
+    GG.newGame();
+    const ids = Object.keys(GG.ITEMS).slice(0, 5);
+    for (const id of ids) assertEq(GG.addItem(id), true);
+    // 6th add should fail
+    const sixth = Object.keys(GG.ITEMS)[5] || Object.keys(GG.ITEMS)[0];
+    const ok = GG.addItem(sixth);
+    assertEq(ok, false, 'over-limit add refused');
+    assertEq(GG.state.inventory.length, 5);
+  });
+
+  test('addItem increments itemsFound stat', ({ GG }) => {
+    GG.newGame();
+    const before = GG.state.stats.itemsFound;
+    GG.addItem('key');
+    assertEq(GG.state.stats.itemsFound, before + 1);
+  });
+
+  test('addItem is idempotent (no duplicates)', ({ GG }) => {
+    GG.newGame();
+    GG.addItem('key');
+    GG.addItem('key');
+    assertEq(GG.state.inventory.filter(i => i === 'key').length, 1);
+  });
+
+  test('removeItem removes an item', ({ GG }) => {
+    GG.newGame();
+    GG.addItem('key');
+    const ok = GG.removeItem('key');
+    assertEq(ok, true);
+    assert(!GG.state.inventory.includes('key'));
+  });
+
+  test('removeItem returns false if missing', ({ GG }) => {
+    GG.newGame();
+    assertEq(GG.removeItem('key'), false);
+  });
+
+  test('hasItem checks presence', ({ GG }) => {
+    GG.newGame();
+    GG.addItem('key');
+    assertEq(GG.hasItem('key'), true);
+    assertEq(GG.hasItem('magicCloak'), false);
+  });
+
+  test('renderInventory draws items into status area', ({ GG, doc }) => {
+    GG.newGame();
+    GG.addItem('key');
+    GG.renderInventory();
+    const status = doc.getElementById('status-area');
+    const text = status.textContent;
+    assert(text.includes(GG.ITEMS.key.icon) || text.includes(GG.ITEMS.key.name),
+      'status area shows the key');
+  });
+
+  test('renderInventory shows empty state when nothing held', ({ GG, doc }) => {
+    GG.newGame();
+    GG.renderInventory();
+    const text = doc.getElementById('status-area').textContent.toLowerCase();
+    assert(text.length > 0, 'status area has something');
+    // Nothing held → should be noticeably shorter than with 5 items
+  });
+
+  test('items have a found-at location', ({ GG }) => {
+    // At least some items should have a location where they can be found.
+    let hasLocation = 0;
+    for (const id of Object.keys(GG.ITEMS)) {
+      if (GG.ITEMS[id].foundAt) hasLocation++;
+    }
+    assert(hasLocation >= 3, 'several items should be placed in the world');
+  });
+
   runAll();
 </script>
 </body>

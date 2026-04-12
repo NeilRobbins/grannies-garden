@@ -709,6 +709,86 @@
     return Object.assign({}, state, { wrongMoves: wrong });
   };
 
+  // --- Inventory system -------------------------------------------------
+  GG.INVENTORY_LIMIT = 5;
+
+  GG.ITEMS = {
+    key: {
+      name: 'Brass Key',
+      description: 'A heavy brass key, warm to the touch.',
+      icon: '\u26B7',       // key-like glyph
+      foundAt: 'forest',
+    },
+    lamp: {
+      name: 'Oil Lamp',
+      description: 'A little lamp whose flame never seems to waver.',
+      icon: '\u2600',       // sun/star glyph
+      foundAt: 'crystalCave',
+    },
+    bread: {
+      name: 'Granny\u2019s Bread',
+      description: 'Fresh from the oven. Its smell calms nervous hearts.',
+      icon: '\u25A0',
+      foundAt: 'gardenGate',
+    },
+    flower: {
+      name: 'Moon Flower',
+      description: 'A silver bloom that opens only at night.',
+      icon: '\u273F',       // flower glyph
+      foundAt: 'meadow',
+    },
+    magicCloak: {
+      name: 'Magic Cloak',
+      description: 'Woven from dusk itself \u2014 the Witch cannot see you.',
+      icon: '\u25BC',
+      foundAt: 'castleRuins',
+    },
+    coin: {
+      name: 'Silver Coin',
+      description: 'Stamped with the King of the Mountains\u2019 crest.',
+      icon: '\u25CF',
+      foundAt: 'river',
+    },
+  };
+
+  GG.hasItem = function (id) {
+    return !!(GG.state && GG.state.inventory && GG.state.inventory.includes(id));
+  };
+
+  GG.addItem = function (id) {
+    if (!GG.state || !GG.ITEMS[id]) return false;
+    const inv = GG.state.inventory;
+    if (inv.includes(id)) return true;                // idempotent
+    if (inv.length >= GG.INVENTORY_LIMIT) return false;
+    inv.push(id);
+    if (GG.state.stats) GG.state.stats.itemsFound += 1;
+    return true;
+  };
+
+  GG.removeItem = function (id) {
+    if (!GG.state) return false;
+    const inv = GG.state.inventory;
+    const idx = inv.indexOf(id);
+    if (idx < 0) return false;
+    inv.splice(idx, 1);
+    return true;
+  };
+
+  GG.renderInventory = function () {
+    const status = document.getElementById('status-area');
+    if (!status || !GG.state) return;
+    const inv = GG.state.inventory || [];
+    if (inv.length === 0) {
+      status.textContent = '(no items)';
+      return;
+    }
+    const parts = inv.map(id => {
+      const it = GG.ITEMS[id];
+      return it ? (it.icon + ' ' + it.name) : id;
+    });
+    status.textContent = parts.join('  ');
+  };
+
   // --- Narrative text (first-visit / revisit) --------------------------
   GG.NARRATIVE = {
     gardenGate: {
