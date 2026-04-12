@@ -141,6 +141,29 @@
     white-space: pre;
   }
 
+  /* ---------- Menu choices ---------- */
+  .tt-choice {
+    background: transparent;
+    color: var(--tt-yellow);
+    border: none;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    text-align: left;
+    padding: 2px 4px;
+    cursor: pointer;
+    text-shadow: inherit;
+    display: inline-block;
+    min-height: 32px;       /* mobile touch target */
+    min-width: 44px;
+  }
+  .tt-choice:hover,
+  .tt-choice:focus {
+    color: var(--tt-white);
+    background: rgba(255,255,0,0.1);
+    outline: none;
+  }
+
   /* ---------- Controls (CRT toggle, mute) ---------- */
   .tt-controls {
     position: absolute;
@@ -271,6 +294,9 @@
     document.body.classList.toggle('crt-off');
   };
 
+  // --- Audio stubs (Task 9 fills these in) -----------------------------
+  GG.blip = function () { /* replaced in task 9 */ };
+
   // --- Typewriter text animation ---------------------------------------
   GG.DEFAULT_TYPEWRITER_SPEED = 28;   // ms per character (feels BBC-ish)
   let activeTypewriter = null;        // the current in-flight animation
@@ -344,6 +370,146 @@
     }
   };
 
+  // --- Locations & navigation ------------------------------------------
+  GG.LOCATIONS = {
+    gardenGate: {
+      name: "Granny's Garden Gate",
+      exits: [ { to: 'crossroads', label: 'Walk through the gate' } ],
+    },
+    crossroads: {
+      name: 'The Crossroads',
+      exits: [
+        { to: 'forest',       label: 'Take the path into the dark forest' },
+        { to: 'river',        label: 'Follow the winding path to the river' },
+        { to: 'mountainPath', label: 'Climb the winding mountain path' },
+        { to: 'cottage',      label: 'Approach the witch\u2019s cottage' },
+        { to: 'gardenGate',   label: 'Return to Granny\u2019s gate' },
+      ],
+    },
+    forest: {
+      name: 'The Dark Forest',
+      exits: [ { to: 'crossroads', label: 'Return to the crossroads' } ],
+    },
+    river: {
+      name: 'The Enchanted River',
+      exits: [ { to: 'crossroads', label: 'Return to the crossroads' } ],
+    },
+    mountainPath: {
+      name: 'The Mountain Path',
+      exits: [ { to: 'crossroads', label: 'Return to the crossroads' } ],
+    },
+    cottage: {
+      name: "The Witch's Cottage",
+      exits: [ { to: 'crossroads', label: 'Flee back to the crossroads' } ],
+    },
+    crystalCave: {
+      name: 'The Crystal Cave',
+      exits: [ { to: 'mountainPath', label: 'Return to the mountain path' } ],
+    },
+    castleRuins: {
+      name: 'The Castle Ruins',
+      exits: [ { to: 'crossroads', label: 'Return to the crossroads' } ],
+    },
+    throneRoom: {
+      name: 'The Throne Room',
+      exits: [], // victory
+    },
+  };
+
+  // Where hidden locations are reached from, once unlocked.
+  const HIDDEN_EXITS = {
+    mountainPath: { to: 'crystalCave', label: 'Enter the crystal cave' },
+    crossroads:   { to: 'castleRuins', label: 'Approach the castle ruins' },
+  };
+
+  // --- Game state -------------------------------------------------------
+  GG.state = null;
+
+  GG.newGame = function () {
+    GG.state = {
+      currentLocation: 'gardenGate',
+      visited: {},
+      rescued: [],            // filled by puzzle system
+      inventory: [],          // filled by inventory system
+      stats: { puzzlesSolved: 0, witchEncounters: 0, itemsFound: 0 },
+    };
+    return GG.state;
+  };
+
+  GG.goTo = function (key) {
+    if (!GG.LOCATIONS[key]) throw new Error('unknown location: ' + key);
+    GG.state.currentLocation = key;
+    GG.state.visited[key] = (GG.state.visited[key] || 0) + 1;
+  };
+
+  /**
+   * Render the given location: location header, narrative (typewriter),
+   * and numbered menu of exits.
+   * The narrative content itself is filled in by task 5; for now we
+   * show a placeholder.
+   */
+  GG.renderLocation = async function (key) {
+    const loc = GG.LOCATIONS[key];
+    if (!loc) throw new Error('unknown location: ' + key);
+    GG.goTo(key);
+
+    // Header (inside the status area until task 10 gives us a dedicated bar)
+    const status = document.getElementById('status-area');
+    let header = document.getElementById('location-header');
+    if (!header) {
+      header = document.createElement('div');
+      header.id = 'location-header';
+      header.style.fontWeight = 'bold';
+      status.prepend(header);
+    }
+    header.textContent = '— ' + loc.name + ' —';
+
+    // Narrative text (placeholder; task 5 fills this in).
+    const textArea = document.getElementById('text-area');
+    const narration = (GG.NARRATIVE && GG.NARRATIVE[key]) ||
+      'You are at ' + loc.name + '.';
+    await GG.typewriter(textArea, narration, { onChar: GG.blip });
+
+    // Menu
+    renderMenu(loc.exits.concat(collectHiddenExits(key)));
+  };
+
+  function collectHiddenExits(key) {
+    // Task 7/8 will gate these; for now show only if state.unlocked has it.
+    const hidden = HIDDEN_EXITS[key];
+    if (!hidden) return [];
+    if (GG.state && GG.state.unlocked && GG.state.unlocked[hidden.to]) {
+      return [hidden];
+    }
+    return [];
+  }
+
+  function renderMenu(exits) {
+    const menu = document.getElementById('menu-area');
+    menu.innerHTML = '';
+    exits.forEach((exit, idx) => {
+      const n = idx + 1;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'tt-choice';
+      btn.dataset.menuChoice = exit.to;
+      btn.dataset.choiceNum  = String(n);
+      btn.setAttribute('role', 'menuitem');
+      btn.setAttribute('aria-label',
+        `Choice ${n}: ${exit.label}. Press ${n} or click to select.`);
+      btn.textContent = n + '. ' + exit.label;
+      btn.addEventListener('click', () => selectChoice(exit.to));
+      menu.appendChild(btn);
+      menu.appendChild(document.createElement('br'));
+    });
+  }
+
+  function selectChoice(targetKey) {
+    GG.skipTypewriter();
+    // Small delay so any in-progress render settles
+    setTimeout(() => { GG.renderLocation(targetKey); }, 20);
+  }
+
   // --- Bootstrap --------------------------------------------------------
   function boot() {
     document.getElementById('crt-toggle').addEventListener('click', GG.toggleCRT);
@@ -358,8 +524,19 @@
     document.addEventListener('keydown', (ev) => {
       if (ev.key === ' ' || ev.code === 'Space') {
         GG.skipTypewriter();
+        return;
+      }
+      // Number keys 1-9 trigger menu choices.
+      if (/^[1-9]$/.test(ev.key)) {
+        const btn = document.querySelector(
+          `[data-menu-choice][data-choice-num="${ev.key}"]`);
+        if (btn) { ev.preventDefault(); btn.click(); }
       }
     });
+
+    // Start the game
+    GG.newGame();
+    GG.renderLocation('gardenGate');
   }
 
   if (document.readyState === 'loading') {

@@ -271,6 +271,107 @@
     target.remove();
   });
 
+  // ============================================================
+  // Task 3: Navigation System Tests
+  // ============================================================
+
+  test('GG.LOCATIONS has all 9 locations', ({ GG }) => {
+    assert(GG.LOCATIONS, 'GG.LOCATIONS should exist');
+    const keys = Object.keys(GG.LOCATIONS).sort();
+    const expected = [
+      'castleRuins', 'cottage', 'crossroads', 'crystalCave', 'forest',
+      'gardenGate', 'mountainPath', 'river', 'throneRoom'
+    ].sort();
+    assertEq(keys, expected, 'location keys');
+  });
+
+  test('each location has a name and exits', ({ GG }) => {
+    for (const [key, loc] of Object.entries(GG.LOCATIONS)) {
+      assert(typeof loc.name === 'string' && loc.name.length > 0,
+        `${key} needs a name`);
+      assert(Array.isArray(loc.exits),
+        `${key} needs exits array`);
+    }
+  });
+
+  test('crossroads connects to four main areas', ({ GG }) => {
+    const exits = GG.LOCATIONS.crossroads.exits.map(e => e.to);
+    for (const needed of ['forest', 'river', 'mountainPath', 'cottage']) {
+      assert(exits.includes(needed),
+        `crossroads should connect to ${needed}, got ${exits}`);
+    }
+  });
+
+  test('game starts at gardenGate', ({ GG }) => {
+    GG.newGame();
+    assertEq(GG.state.currentLocation, 'gardenGate', 'initial location');
+  });
+
+  test('navigating updates current location', ({ GG }) => {
+    GG.newGame();
+    GG.goTo('crossroads');
+    assertEq(GG.state.currentLocation, 'crossroads', 'after goTo');
+  });
+
+  test('location name renders as header in status area', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('crossroads');
+    const header = doc.getElementById('location-header');
+    assert(header, '#location-header should exist');
+    assert(/crossroads/i.test(header.textContent),
+      `header should show location name, got "${header.textContent}"`);
+  });
+
+  test('renderLocation draws numbered menu choices', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('crossroads');
+    const menu = doc.getElementById('menu-area');
+    const buttons = menu.querySelectorAll('[data-menu-choice]');
+    assert(buttons.length >= 2,
+      `crossroads should have multiple menu choices, got ${buttons.length}`);
+    // First button should be "1. ..."
+    assert(/^1[\.\)]/.test(buttons[0].textContent.trim()),
+      `first choice should start with "1.", got "${buttons[0].textContent}"`);
+  });
+
+  test('clicking menu choice transitions location', async ({ GG, doc }) => {
+    GG.newGame();
+    GG.state.currentLocation = 'crossroads';
+    await GG.renderLocation('crossroads');
+    const menu = doc.getElementById('menu-area');
+    const first = menu.querySelector('[data-menu-choice]');
+    const targetLoc = first.dataset.menuChoice;
+    first.click();
+    // Allow any transition text to begin
+    await new Promise(r => setTimeout(r, 50));
+    assertEq(GG.state.currentLocation, targetLoc, 'location changed on click');
+  });
+
+  test('pressing number key selects matching menu choice', async ({ GG, doc, win }) => {
+    GG.newGame();
+    GG.state.currentLocation = 'crossroads';
+    await GG.renderLocation('crossroads');
+    const first = doc.querySelector('[data-menu-choice]');
+    const targetLoc = first.dataset.menuChoice;
+    // Make sure any pending typewriter is done first
+    GG.skipTypewriter();
+    await new Promise(r => setTimeout(r, 10));
+    const ev = new win.KeyboardEvent('keydown', { key: '1', bubbles: true });
+    doc.dispatchEvent(ev);
+    await new Promise(r => setTimeout(r, 50));
+    assertEq(GG.state.currentLocation, targetLoc, 'number key should navigate');
+  });
+
+  test('menu choice buttons have aria-labels', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('crossroads');
+    const buttons = doc.querySelectorAll('[data-menu-choice]');
+    for (const b of buttons) {
+      assert(b.getAttribute('aria-label'),
+        `menu button "${b.textContent.trim()}" should have aria-label`);
+    }
+  });
+
   runAll();
 </script>
 </body>
