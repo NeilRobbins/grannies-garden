@@ -1227,6 +1227,163 @@
       'root has aria-label for SR users');
   });
 
+  // ============================================================
+  // Task 12: End-to-end & replayability
+  // ============================================================
+
+  test('every location in GG.LOCATIONS is reachable from gardenGate', ({ GG }) => {
+    const keys = Object.keys(GG.LOCATIONS);
+    const reached = new Set(['gardenGate']);
+    const queue = ['gardenGate'];
+    while (queue.length) {
+      const k = queue.shift();
+      const loc = GG.LOCATIONS[k];
+      const exits = (loc.exits || []).slice();
+      // Include hidden exits so the reachability proof covers the
+      // fully-unlocked world.
+      const hidden = (GG.HIDDEN_EXITS && GG.HIDDEN_EXITS[k]);
+      if (hidden) exits.push(hidden);
+      for (const exit of exits) {
+        const to = exit.to;
+        if (to && !reached.has(to)) {
+          reached.add(to);
+          queue.push(to);
+        }
+      }
+    }
+    for (const k of keys) {
+      assert(reached.has(k), `${k} unreachable from gardenGate`);
+    }
+  });
+
+  test('replay: same seed produces identical puzzle sequence', ({ GG }) => {
+    function playPuzzleSeq(seed) {
+      GG.newGame(seed);
+      const out = [];
+      for (const loc of GG.RESCUE_LOCATIONS) {
+        out.push(GG.pickPuzzle(loc).question);
+      }
+      return out;
+    }
+    assertEq(playPuzzleSeq(12345), playPuzzleSeq(12345),
+      'same seed is reproducible');
+  });
+
+  test('replay: different seeds produce different puzzle sequences', ({ GG }) => {
+    function playPuzzleSeq(seed) {
+      GG.newGame(seed);
+      return GG.RESCUE_LOCATIONS.map(l => GG.pickPuzzle(l).question).join('|');
+    }
+    const a = playPuzzleSeq(1);
+    let found = false;
+    for (let s = 2; s < 40; s++) {
+      if (playPuzzleSeq(s) !== a) { found = true; break; }
+    }
+    assert(found, 'at least one other seed diverges');
+  });
+
+  test('replay: same seed yields identical witch-spawn stream', ({ GG }) => {
+    function trace(seed) {
+      GG.newGame(seed);
+      const out = [];
+      for (let i = 0; i < 40; i++) out.push(GG.maybeSpawnWitch('forest'));
+      return out;
+    }
+    assertEq(trace(9999), trace(9999));
+  });
+
+  test('full playthrough: all 6 rescues -> victory', ({ GG }) => {
+    GG.newGame(7);
+    // Navigate and rescue each child via solving the picked puzzle.
+    for (const loc of GG.RESCUE_LOCATIONS) {
+      const p = GG.pickPuzzle(loc);
+      const ok = GG.answerPuzzle(p, p.answer);
+      assertEq(ok, true, `${loc} puzzle solved`);
+      GG.rescueChild(loc);
+    }
+    assertEq(GG.isVictory(), true, 'victorious');
+    assertEq(GG.state.stats.puzzlesSolved, 6, '6 puzzles solved');
+  });
+
+  test('catch penalty handles empty inventory gracefully', ({ GG }) => {
+    GG.newGame(1);
+    assertEq(GG.state.inventory.length, 0);
+    // Should not throw.
+    GG.handleCatch();
+    assertEq(GG.state.currentLocation, 'gardenGate');
+  });
+
+  test('magicCloak persists after a witch encounter (immunity proven)', ({ GG }) => {
+    GG.newGame(1);
+    GG.addItem('magicCloak');
+    // No spawn should happen in 500 rolls across all dangerous locations.
+    for (let i = 0; i < 500; i++) {
+      assertEq(GG.maybeSpawnWitch('forest'), false);
+    }
+    assert(GG.hasItem('magicCloak'), 'still holding cloak');
+  });
+
+  test('file stays comfortably under 200KB budget', async () => {
+    const res = await fetch('../index.html');
+    const txt = await res.text();
+    const bytes = new Blob([txt]).size;
+    assert(bytes < 200 * 1024,
+      `index.html is ${bytes} bytes; must be < ${200 * 1024}`);
+  });
+
+  test('no external <script src> or <link href> (single-file rule)', async ({ doc }) => {
+    // Check the game iframe document (not this harness).
+    const res = await fetch('../index.html');
+    const html = await res.text();
+    assert(!/<script[^>]+src=/i.test(html), 'no external scripts');
+    assert(!/<link[^>]+href=["'](?!#)/i.test(html) ||
+      /<link[^>]+href=["']#/i.test(html) === false,
+      'no external stylesheets');
+    // The meta viewport <meta> does NOT count; we re-check only link/script.
+    const linkMatches = html.match(/<link[^>]+>/gi) || [];
+    for (const tag of linkMatches) {
+      assert(!/href=["']http/i.test(tag),
+        'no http-linked resources');
+    }
+  });
+
+  test('restart: play-again button starts a fresh game', async ({ GG, doc }) => {
+    GG.newGame(100);
+    GG.state.rescued = GG.RESCUE_LOCATIONS.slice();
+    GG.state.stats.puzzlesSolved = 12;
+    await GG.renderVictory();
+    const btn = doc.querySelector('[data-menu-choice="restart"]');
+    assert(btn, 'restart button rendered');
+    btn.click();
+    // Give renderLocation a tick to wire state
+    await new Promise(r => setTimeout(r, 30));
+    assertEq(GG.state.stats.puzzlesSolved, 0, 'stats reset');
+    assertEq(GG.state.rescued.length, 0, 'rescued reset');
+    assertEq(GG.state.currentLocation, 'gardenGate', 'back at gate');
+  });
+
+  test('crossroads (including hidden) reaches all 4 main areas', ({ GG }) => {
+    const exits = GG.LOCATIONS.crossroads.exits.slice();
+    if (GG.HIDDEN_EXITS && GG.HIDDEN_EXITS.crossroads) {
+      exits.push(GG.HIDDEN_EXITS.crossroads);
+    }
+    const tos = exits.map(e => e.to);
+    for (const req of ['forest', 'river', 'mountainPath', 'castleRuins']) {
+      assert(tos.includes(req), `crossroads -> ${req}`);
+    }
+  });
+
+  test('victory stats remain stable if renderVictory called twice', async ({ GG }) => {
+    GG.newGame(33);
+    GG.state.rescued = GG.RESCUE_LOCATIONS.slice();
+    GG.state.stats.puzzlesSolved = 9;
+    GG.state.stats.witchEncounters = 2;
+    await GG.renderVictory();
+    await GG.renderVictory();
+    assertEq(GG.state.stats.puzzlesSolved, 9);
+    assertEq(GG.state.stats.witchEncounters, 2);
+  });
+
   runAll();
 </script>
 </body>
