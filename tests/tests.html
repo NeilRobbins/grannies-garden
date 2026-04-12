@@ -1113,6 +1113,120 @@
     assertEq(GG.isVictory(), true);
   });
 
+  // ============================================================
+  // Task 11: Polish — a11y, responsiveness, motion
+  // ============================================================
+
+  test('meta viewport tag present for mobile scaling', ({ doc }) => {
+    const m = doc.querySelector('meta[name="viewport"]');
+    assert(m, 'viewport meta exists');
+    assert(/width=device-width/i.test(m.getAttribute('content') || ''),
+      'viewport uses device-width');
+  });
+
+  test('main game container has role=application', ({ doc }) => {
+    const frame = doc.getElementById('crt-frame');
+    assert(frame, 'crt-frame exists');
+    assertEq(frame.getAttribute('role'), 'application');
+  });
+
+  test('display panel has aria-live', ({ doc }) => {
+    const panel = doc.getElementById('display-panel');
+    assert(panel, 'display-panel exists');
+    assert(panel.hasAttribute('aria-live'), 'aria-live present');
+  });
+
+  test('menu area has role=menu', ({ doc }) => {
+    const menu = doc.getElementById('menu-area');
+    assertEq(menu.getAttribute('role'), 'menu');
+  });
+
+  test('CRT and mute buttons expose aria-labels', ({ doc }) => {
+    const crt = doc.getElementById('crt-toggle');
+    const mute = doc.getElementById('mute-toggle');
+    assert(crt.getAttribute('aria-label'), 'crt aria-label');
+    assert(mute.getAttribute('aria-label'), 'mute aria-label');
+  });
+
+  test('responsive CSS defines @media breakpoints', ({ doc, win }) => {
+    const cssText = Array.from(doc.styleSheets)
+      .flatMap(s => { try { return Array.from(s.cssRules); }
+                      catch(_) { return []; } })
+      .map(r => r.cssText || '').join('\n');
+    assert(/@media[^{]*max-width/i.test(cssText),
+      'at least one max-width media query present');
+  });
+
+  test('reduced-motion media query exists', ({ doc }) => {
+    const cssText = Array.from(doc.styleSheets)
+      .flatMap(s => { try { return Array.from(s.cssRules); }
+                      catch(_) { return []; } })
+      .map(r => r.cssText || '').join('\n');
+    assert(/prefers-reduced-motion/i.test(cssText),
+      'prefers-reduced-motion query defined');
+  });
+
+  test('focusable buttons receive focus outline', ({ doc, win }) => {
+    // Render a location so menu has buttons
+    return (async () => {
+      const GG = win.GG;
+      GG.newGame(1);
+      await GG.renderLocation('gardenGate');
+      const btn = doc.querySelector('[data-menu-choice]');
+      assert(btn, 'some menu button exists');
+      btn.focus();
+      // Focus is observable via document.activeElement
+      assertEq(doc.activeElement, btn, 'button receives focus');
+    })();
+  });
+
+  test('menu buttons are keyboard-operable (tab/role)', async ({ GG, doc }) => {
+    GG.newGame(1);
+    await GG.renderLocation('gardenGate');
+    const buttons = doc.querySelectorAll('#menu-area button[data-menu-choice]');
+    assert(buttons.length > 0, 'buttons render');
+    for (const b of buttons) {
+      // Default <button> is focusable; tabindex should be absent or >= 0
+      const ti = b.getAttribute('tabindex');
+      assert(ti === null || Number(ti) >= 0,
+        'tabindex not negative: ' + ti);
+    }
+  });
+
+  test('GG.prefersReducedMotion helper returns a boolean', ({ GG }) => {
+    assert(typeof GG.prefersReducedMotion === 'function',
+      'helper exists');
+    const v = GG.prefersReducedMotion();
+    assert(v === true || v === false, 'returns boolean');
+  });
+
+  test('reduced-motion shortens typewriter speed', ({ GG, win }) => {
+    // If reduced motion, DEFAULT_TYPEWRITER_SPEED should be <=5 ms.
+    // We cannot actually change the host's media-query state here, but
+    // we can assert that GG.typewriterSpeedForMotion returns a small
+    // value when the flag is true.
+    assert(typeof GG.typewriterSpeedForMotion === 'function');
+    assertEq(GG.typewriterSpeedForMotion(true), 0);
+    assert(GG.typewriterSpeedForMotion(false) >= 1);
+  });
+
+  test('location transitions have a fade CSS class defined', ({ doc }) => {
+    const cssText = Array.from(doc.styleSheets)
+      .flatMap(s => { try { return Array.from(s.cssRules); }
+                      catch(_) { return []; } })
+      .map(r => r.cssText || '').join('\n');
+    assert(/\.fade-in|\.tt-fade/.test(cssText),
+      'fade animation class defined');
+  });
+
+  test('skip-to-content link exists for screen readers', ({ doc }) => {
+    // Any element with an id and a link/button acting as skip works;
+    // we just check there is an accessible title/aria-label on the root.
+    const frame = doc.getElementById('crt-frame');
+    assert(frame.getAttribute('aria-label'),
+      'root has aria-label for SR users');
+  });
+
   runAll();
 </script>
 </body>

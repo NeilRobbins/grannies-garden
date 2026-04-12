@@ -215,6 +215,36 @@
     #display-panel { font-size: 12px; }
     #crt-frame { padding: 12px; border-radius: 16px; }
   }
+
+  /* ---------- Gentle fade for panel transitions ---------- */
+  @keyframes tt-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .tt-fade {
+    animation: tt-fade-in 320ms ease-out;
+  }
+  .fade-in {
+    animation: tt-fade-in 320ms ease-out;
+  }
+
+  /* ---------- Accessible focus ring ---------- */
+  #menu-area button:focus,
+  #menu-area button:focus-visible {
+    outline: 2px solid var(--tt-yellow);
+    outline-offset: 2px;
+  }
+
+  /* ---------- Reduced-motion preference ---------- */
+  @media (prefers-reduced-motion: reduce) {
+    .tt-fade, .fade-in { animation: none !important; }
+    #scanlines { display: none !important; }
+    #display-panel { transition: none !important; }
+    *, *::before, *::after {
+      animation-duration: 0s !important;
+      transition-duration: 0s !important;
+    }
+  }
 </style>
 </head>
 <body>
@@ -311,6 +341,20 @@
   // --- CRT effect toggle ------------------------------------------------
   GG.toggleCRT = function () {
     document.body.classList.toggle('crt-off');
+  };
+
+  // --- Motion preference helpers ---------------------------------------
+  GG.prefersReducedMotion = function () {
+    try {
+      return !!(window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (_) { return false; }
+  };
+
+  GG.typewriterSpeedForMotion = function (reduced) {
+    const isReduced = reduced == null ? GG.prefersReducedMotion() : !!reduced;
+    if (isReduced) return 0;                 // instant reveal
+    return GG.DEFAULT_TYPEWRITER_SPEED;
   };
 
   // --- Audio system (Web Audio API) ------------------------------------
@@ -1366,7 +1410,14 @@
     if (!loc) throw new Error('unknown location: ' + key);
     GG.goTo(key);
 
-    // Scene art
+    // Scene art (with a gentle fade-in for scene changes)
+    const art = document.getElementById('art-area');
+    if (art) {
+      art.classList.remove('tt-fade');
+      // Force reflow so the animation restarts.
+      void art.offsetWidth;
+      art.classList.add('tt-fade');
+    }
     GG.renderArt(key);
 
     // Header (inside the status area until task 10 gives us a dedicated bar)
