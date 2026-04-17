@@ -1740,10 +1740,13 @@
       renderMenu(loc.exits.concat(collectHiddenExits(locKey)));
     } else {
       GG.Audio.fail();
+      GG.Audio.witch();
       await GG.typewriter(textArea,
-        'Wrong! The shadows swirl and you are swept away...');
-      renderMenu([{ to: locKey, label: 'Try again' },
-                  { to: 'crossroads', label: 'Retreat to the crossroads' }]);
+        'WRONG! The Wicked Witch swoops down with a terrible cackle! ' +
+        'She snatches you up and hurls you all the way back to ' +
+        'Granny\u2019s garden gate.');
+      GG.handleCatch();
+      renderMenu([{ to: 'gardenGate', label: 'Pick yourself up' }]);
     }
   }
 
