@@ -461,9 +461,9 @@
 
     init: function () {
       if (this.ctx) {
-        // iOS Safari suspends the context until a user gesture resumes it.
         if (this.ctx.state === 'suspended') {
           this.ctx.resume().catch(function () {});
+          this._playSilent();
         }
         return this.ctx;
       }
@@ -474,14 +474,27 @@
         this._master = this.ctx.createGain();
         this._master.gain.value = this.muted ? 0 : 0.15;
         this._master.connect(this.ctx.destination);
-        // Immediately resume — required on iOS Safari.
         if (this.ctx.state === 'suspended') {
           this.ctx.resume().catch(function () {});
         }
+        // Play a silent buffer to warm up iOS Safari. Without this,
+        // iOS creates the context but never actually lets audio through.
+        this._playSilent();
       } catch (_) {
         this.ctx = null;
       }
       return this.ctx;
+    },
+
+    _playSilent: function () {
+      if (!this.ctx) return;
+      try {
+        var buf = this.ctx.createBuffer(1, 1, this.ctx.sampleRate);
+        var src = this.ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(this.ctx.destination);
+        src.start(0);
+      } catch (_) {}
     },
 
     setMuted: function (flag) {
