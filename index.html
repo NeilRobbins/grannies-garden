@@ -275,6 +275,22 @@
     color: #000;
   }
 
+  /* ---------- Free-text puzzle input ---------- */
+  .tt-input {
+    display: block;
+    width: 80%;
+    margin: 6px 0;
+    padding: 6px 10px;
+    background: #000;
+    color: var(--tt-yellow);
+    border: 1px solid var(--tt-cyan);
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: inherit;
+    outline: none;
+  }
+  .tt-input:focus { border-color: var(--tt-yellow); }
+
   /* ---------- Gentle fade for panel transitions ---------- */
   @keyframes tt-fade-in {
     from { opacity: 0; }
@@ -1103,16 +1119,22 @@
   GG.renderInventory = function () {
     const status = document.getElementById('status-area');
     if (!status || !GG.state) return;
+    let el = document.getElementById('inventory-display');
+    if (!el) {
+      el = document.createElement('span');
+      el.id = 'inventory-display';
+      status.appendChild(el);
+    }
     const inv = GG.state.inventory || [];
     if (inv.length === 0) {
-      status.textContent = '(no items)';
+      el.textContent = '  (no items)';
       return;
     }
     const parts = inv.map(id => {
       const it = GG.ITEMS[id];
       return it ? (it.icon + ' ' + it.name) : id;
     });
-    status.textContent = parts.join('  ');
+    el.textContent = '  ' + parts.join('  ');
   };
 
   // --- Narrative text (first-visit / revisit) --------------------------
@@ -1467,8 +1489,9 @@
       startedAt: Date.now(),
       currentLocation: 'gardenGate',
       visited: {},
-      rescued: [],            // filled by puzzle system
-      inventory: [],          // filled by inventory system
+      rescued: [],
+      inventory: [],
+      unlocked: {},
       gameOver: false,
       stats: { puzzlesSolved: 0, witchEncounters: 0, itemsFound: 0 },
     };
@@ -1529,9 +1552,194 @@
     }
     await GG.typewriter(textArea, narration, { onChar: GG.blip });
 
-    // Menu
+    // --- Game loop: witch → item → puzzle → rescue ----------------------
+    const isPuzzleLoc = GG.RESCUE_LOCATIONS.includes(key);
+    const alreadyRescued = GG.state.rescued.includes(key);
+
+    // Witch encounter (not at safe locations, not if already rescued here)
+    if (isPuzzleLoc && !alreadyRescued && GG.maybeSpawnWitch(key)) {
+      GG.Audio.witch();
+      const result = await runWitchEncounter(key);
+      if (result.caught) {
+        GG.handleCatch();
+        await GG.typewriter(textArea,
+          'The Witch cackles and hurls you back to the garden gate!');
+        GG.Audio.fail();
+        renderMenu([{ to: 'gardenGate', label: 'Pick yourself up' }]);
+        return;
+      }
+      await GG.typewriter(textArea,
+        'You hide just in time! The Witch swoops past and vanishes.');
+    }
+
+    // Item pickup (first visit only, if this location has one)
+    if (isPuzzleLoc && visits <= 1) {
+      for (const [id, item] of Object.entries(GG.ITEMS)) {
+        if (item.foundAt === key && !GG.hasItem(id)) {
+          const added = GG.addItem(id);
+          if (added) {
+            await GG.typewriter(textArea,
+              '\nYou find something: ' + item.icon + ' ' + item.name +
+              '. ' + item.description, { clear: false });
+            GG.renderInventory();
+          }
+        }
+      }
+    }
+
+    // Puzzle (only if child not yet rescued)
+    if (isPuzzleLoc && !alreadyRescued) {
+      const puzzle = GG.pickPuzzle(key);
+      await presentPuzzle(key, puzzle);
+      return;   // presentPuzzle handles menu from here
+    }
+
+    if (isPuzzleLoc && alreadyRescued) {
+      await GG.typewriter(textArea,
+        '\nThe child here is already safe. You feel a warm glow.',
+        { clear: false });
+    }
+
+    // Default: show navigation exits
+    GG.renderInventory();
     renderMenu(loc.exits.concat(collectHiddenExits(key)));
   };
+
+  async function runWitchEncounter(locKey) {
+    if (locKey === GG.WITCH.chaseLocation) {
+      const chase = GG.startChase();
+      return await runChaseSequence(chase);
+    }
+    GG.state.stats.witchEncounters += 1;
+    await GG.renderWitchWarning();
+    return new Promise(resolve => {
+      const menu = document.getElementById('menu-area');
+      menu.innerHTML = '';
+      const choices = [
+        { label: 'Hide behind a rock', action: 'hide' },
+        { label: 'Run for it!',        action: 'run' },
+        { label: 'Stand very still',    action: 'still' },
+      ];
+      const rnd = GG.state.rng || Math.random;
+      const safeAction = choices[Math.floor(rnd() * choices.length)].action;
+      choices.forEach((c, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tt-choice';
+        btn.textContent = (i + 1) + '. ' + c.label;
+        btn.setAttribute('role', 'menuitem');
+        btn.addEventListener('click', () => {
+          resolve({ caught: c.action !== safeAction });
+        });
+        menu.appendChild(btn);
+        menu.appendChild(document.createElement('br'));
+      });
+    });
+  }
+
+  async function runChaseSequence(chase) {
+    GG.state.stats.witchEncounters += 1;
+    const textArea = document.getElementById('text-area');
+    while (!chase.escaped && !chase.caught) {
+      const room = chase.rooms[chase.currentRoom];
+      await GG.typewriter(textArea,
+        'You burst into the ' + room.name + '! Which way?');
+      const dir = await new Promise(resolve => {
+        const menu = document.getElementById('menu-area');
+        menu.innerHTML = '';
+        room.exits.forEach((d, i) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'tt-choice';
+          btn.textContent = (i + 1) + '. Go ' + d;
+          btn.setAttribute('role', 'menuitem');
+          btn.addEventListener('click', () => resolve(d));
+          menu.appendChild(btn);
+          menu.appendChild(document.createElement('br'));
+        });
+      });
+      chase = GG.chaseStep(chase, dir);
+    }
+    return chase;
+  }
+
+  async function presentPuzzle(locKey, puzzle) {
+    const textArea = document.getElementById('text-area');
+    const menu = document.getElementById('menu-area');
+
+    await GG.typewriter(textArea,
+      '\nA voice echoes: "' + puzzle.question + '"', { clear: false });
+
+    if (Array.isArray(puzzle.choices) && puzzle.choices.length) {
+      // Multiple choice
+      menu.innerHTML = '';
+      puzzle.choices.forEach((c, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tt-choice';
+        btn.dataset.puzzleChoice = c;
+        btn.textContent = (i + 1) + '. ' + c;
+        btn.setAttribute('role', 'menuitem');
+        btn.addEventListener('click', () => handleAnswer(locKey, puzzle, c));
+        menu.appendChild(btn);
+        menu.appendChild(document.createElement('br'));
+      });
+    } else {
+      // Free-text input
+      menu.innerHTML = '';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = 'Type your answer...';
+      input.className = 'tt-input';
+      input.setAttribute('aria-label', 'Your answer');
+      const submit = document.createElement('button');
+      submit.type = 'button';
+      submit.className = 'tt-choice';
+      submit.textContent = 'Submit';
+      const doSubmit = () => handleAnswer(locKey, puzzle, input.value);
+      submit.addEventListener('click', doSubmit);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doSubmit();
+      });
+      menu.appendChild(input);
+      menu.appendChild(document.createElement('br'));
+      menu.appendChild(submit);
+      input.focus();
+    }
+  }
+
+  async function handleAnswer(locKey, puzzle, playerAnswer) {
+    const textArea = document.getElementById('text-area');
+    const ok = GG.answerPuzzle(puzzle, playerAnswer);
+
+    if (ok) {
+      GG.Audio.success();
+      GG.rescueChild(locKey);
+      // Unlock hidden exits from this location
+      if (!GG.state.unlocked) GG.state.unlocked = {};
+      const hidden = HIDDEN_EXITS[locKey];
+      if (hidden) GG.state.unlocked[hidden.to] = true;
+
+      if (GG.isVictory()) {
+        await GG.renderVictory();
+        return;
+      }
+
+      await GG.typewriter(textArea,
+        'That is correct! A child steps out of the shadows, free at last. ' +
+        '(' + GG.state.rescued.length + '/' + GG.RESCUE_LOCATIONS.length +
+        ' rescued)');
+      GG.renderInventory();
+      const loc = GG.LOCATIONS[locKey];
+      renderMenu(loc.exits.concat(collectHiddenExits(locKey)));
+    } else {
+      GG.Audio.fail();
+      await GG.typewriter(textArea,
+        'Wrong! The shadows swirl and you are swept away...');
+      renderMenu([{ to: locKey, label: 'Try again' },
+                  { to: 'crossroads', label: 'Retreat to the crossroads' }]);
+    }
+  }
 
   function collectHiddenExits(key) {
     // Task 7/8 will gate these; for now show only if state.unlocked has it.

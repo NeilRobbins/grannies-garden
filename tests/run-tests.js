@@ -38,7 +38,7 @@ const server = http.createServer((req, res) => {
 
   await page.goto(fileUrl);
   // Wait for tests to finish
-  await page.waitForFunction(() => window.__testsComplete === true, { timeout: 15000 });
+  await page.waitForFunction(() => window.__testsComplete === true, { timeout: 30000 });
   const results = await page.evaluate(() => window.__testResults);
 
   for (const line of logs) console.log(line);

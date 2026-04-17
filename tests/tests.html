@@ -35,6 +35,10 @@
     // Speed up animation so narrative-heavy tests don't time out.
     // We keep it >0 so the "speed is a sane ms value" test still holds.
     GG.DEFAULT_TYPEWRITER_SPEED = 1;
+    // Disable witch spawning during renderLocation tests — witch-specific
+    // tests call maybeSpawnWitch/witchEncounter directly, so they still work.
+    GG.WITCH._originalRate = GG.WITCH.encounterRate;
+    GG.WITCH.encounterRate = 0;
 
     for (const t of tests) {
       try {
@@ -669,10 +673,10 @@
 
   test('GG.WITCH config exists with encounter rate and safe locations', ({ GG }) => {
     assert(GG.WITCH, 'GG.WITCH namespace should exist');
-    assert(typeof GG.WITCH.encounterRate === 'number',
-      'encounterRate should be a number');
-    assert(GG.WITCH.encounterRate > 0 && GG.WITCH.encounterRate < 1,
-      'encounterRate should be a probability');
+    // Restore original rate for this test.
+    const rate = GG.WITCH._originalRate;
+    assert(typeof rate === 'number', 'encounterRate should be a number');
+    assert(rate > 0 && rate < 1, 'encounterRate should be a probability');
     assert(Array.isArray(GG.WITCH.safeLocations),
       'safeLocations should be an array');
     assert(GG.WITCH.safeLocations.includes('gardenGate'),
@@ -698,13 +702,17 @@
   });
 
   test('maybeSpawnWitch sometimes spawns in dangerous locations', ({ GG }) => {
-    GG.newGame(42);
-    let spawns = 0;
-    for (let i = 0; i < 200; i++) {
-      if (GG.maybeSpawnWitch('forest')) spawns++;
-    }
-    assert(spawns > 5, `witch should spawn at least a few times, got ${spawns}`);
-    assert(spawns < 200, 'witch should not always spawn');
+    const saved = GG.WITCH.encounterRate;
+    GG.WITCH.encounterRate = GG.WITCH._originalRate;
+    try {
+      GG.newGame(42);
+      let spawns = 0;
+      for (let i = 0; i < 200; i++) {
+        if (GG.maybeSpawnWitch('forest')) spawns++;
+      }
+      assert(spawns > 5, `witch should spawn at least a few times, got ${spawns}`);
+      assert(spawns < 200, 'witch should not always spawn');
+    } finally { GG.WITCH.encounterRate = saved; }
   });
 
   test('Magic Cloak in inventory prevents witch spawn', ({ GG }) => {
