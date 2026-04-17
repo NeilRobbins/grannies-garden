@@ -209,11 +209,25 @@
   @media (max-width: 720px) {
     :root { --cell-w: 11px; --cell-h: 20px; }
     #display-panel { font-size: 16px; }
+
+    html, body { overflow: auto; height: auto; }
+    body { min-height: 100vh; min-height: 100dvh; }
+
+    #display-panel {
+      height: auto;
+      min-height: calc(var(--rows) * var(--cell-h));
+      overflow-y: visible;
+      width: calc(100vw - 48px);
+    }
+
+    #art-area { min-height: 0; }
   }
   @media (max-width: 480px) {
     :root { --cell-w: 8px; --cell-h: 15px; }
     #display-panel { font-size: 12px; }
     #crt-frame { padding: 12px; border-radius: 16px; }
+
+    #display-panel { width: calc(100vw - 24px); }
   }
 
   /* ---------- Gentle fade for panel transitions ---------- */
