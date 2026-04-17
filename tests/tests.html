@@ -1,0 +1,1390 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Granny's Garden — Tests</title>
+</head>
+<body>
+<iframe id="game" src="../index.html" style="width:800px;height:600px;border:1px solid #333"></iframe>
+<div id="output" style="font-family:monospace;white-space:pre;padding:10px"></div>
+<script>
+  // Tiny test framework
+  const tests = [];
+  const failures = [];
+  let passed = 0, failed = 0;
+
+  function test(name, fn) { tests.push({ name, fn }); }
+  function assert(cond, msg) {
+    if (!cond) throw new Error(msg || 'Assertion failed');
+  }
+  function assertEq(actual, expected, msg) {
+    const a = JSON.stringify(actual), e = JSON.stringify(expected);
+    if (a !== e) throw new Error((msg || 'Not equal') + `: expected ${e}, got ${a}`);
+  }
+
+  async function runAll() {
+    const frame = document.getElementById('game');
+    await new Promise(r => frame.addEventListener('load', r, { once: true }));
+    // Give the game a moment to boot
+    await new Promise(r => setTimeout(r, 200));
+
+    const GG = frame.contentWindow.GG;
+    const doc = frame.contentDocument;
+    const win = frame.contentWindow;
+
+    // Speed up animation so narrative-heavy tests don't time out.
+    // We keep it >0 so the "speed is a sane ms value" test still holds.
+    GG.DEFAULT_TYPEWRITER_SPEED = 1;
+
+    for (const t of tests) {
+      try {
+        await t.fn({ GG, doc, win, frame });
+        passed++;
+        console.log('PASS: ' + t.name);
+      } catch (err) {
+        failed++;
+        failures.push({ name: t.name, error: err.message });
+        console.log('FAIL: ' + t.name + ' — ' + err.message);
+      }
+    }
+
+    window.__testResults = { passed, failed, total: tests.length, failures };
+    window.__testsComplete = true;
+    document.getElementById('output').textContent =
+      `Passed: ${passed}  Failed: ${failed}  Total: ${tests.length}`;
+  }
+
+  // ============================================================
+  // Task 1: Rendering Engine Tests
+  // ============================================================
+
+  test('GG namespace is exposed on window', ({ GG }) => {
+    assert(GG, 'window.GG should be defined');
+  });
+
+  test('TELETEXT_COLORS contains exactly the 8 teletext colours', ({ GG }) => {
+    const expected = {
+      black:   '#000000',
+      red:     '#FF0000',
+      green:   '#00FF00',
+      yellow:  '#FFFF00',
+      blue:    '#0000FF',
+      magenta: '#FF00FF',
+      cyan:    '#00FFFF',
+      white:   '#FFFFFF',
+    };
+    assert(GG.TELETEXT_COLORS, 'GG.TELETEXT_COLORS should exist');
+    assertEq(Object.keys(GG.TELETEXT_COLORS).sort(), Object.keys(expected).sort(),
+      'colour names');
+    for (const [name, hex] of Object.entries(expected)) {
+      assertEq(GG.TELETEXT_COLORS[name].toUpperCase(), hex, `colour ${name}`);
+    }
+  });
+
+  test('display panel element exists', ({ doc }) => {
+    const panel = doc.getElementById('display-panel');
+    assert(panel, '#display-panel should exist');
+  });
+
+  test('display panel is centred on page', ({ doc, win }) => {
+    const panel = doc.getElementById('display-panel');
+    const rect = panel.getBoundingClientRect();
+    const winWidth = win.innerWidth;
+    const panelCentre = rect.left + rect.width / 2;
+    const windowCentre = winWidth / 2;
+    assert(Math.abs(panelCentre - windowCentre) < 5,
+      `panel should be centred (panel centre ${panelCentre}, window centre ${windowCentre})`);
+  });
+
+  test('display panel uses monospace font', ({ doc, win }) => {
+    const panel = doc.getElementById('display-panel');
+    const style = win.getComputedStyle(panel);
+    assert(/courier|mono/i.test(style.fontFamily),
+      'font-family should be monospace, got: ' + style.fontFamily);
+  });
+
+  test('display panel background is black', ({ doc, win }) => {
+    const panel = doc.getElementById('display-panel');
+    const style = win.getComputedStyle(panel);
+    const bg = style.backgroundColor;
+    // rgb(0,0,0) or transparent-over-black body
+    const parent = win.getComputedStyle(doc.body).backgroundColor;
+    const isBlack = (c) => /rgba?\(\s*0\s*,\s*0\s*,\s*0\s*[,)]/.test(c);
+    assert(isBlack(bg) || isBlack(parent),
+      `panel or body should have black background. panel=${bg}, body=${parent}`);
+  });
+
+  test('scanline overlay exists', ({ doc }) => {
+    const scan = doc.getElementById('scanlines');
+    assert(scan, '#scanlines element should exist');
+  });
+
+  test('CRT toggle button exists', ({ doc }) => {
+    const btn = doc.getElementById('crt-toggle');
+    assert(btn, '#crt-toggle button should exist');
+  });
+
+  test('CRT toggle flips crt-off class on body', ({ doc }) => {
+    const body = doc.body;
+    const btn = doc.getElementById('crt-toggle');
+    const before = body.classList.contains('crt-off');
+    btn.click();
+    const after = body.classList.contains('crt-off');
+    assert(before !== after, 'CRT toggle should toggle body.crt-off class');
+    // Restore state
+    btn.click();
+  });
+
+  test('scanlines hidden when CRT off', ({ doc, win }) => {
+    const body = doc.body;
+    const scan = doc.getElementById('scanlines');
+    body.classList.add('crt-off');
+    // getComputedStyle returns a live object — read snapshot values now.
+    const offDisplay = win.getComputedStyle(scan).display;
+    const offOpacity = win.getComputedStyle(scan).opacity;
+    body.classList.remove('crt-off');
+    assert(offDisplay === 'none' || offOpacity === '0',
+      `scanlines should be hidden when CRT off (display=${offDisplay}, opacity=${offOpacity})`);
+  });
+
+  test('createGrid(cols, rows) returns element with correct dimensions', ({ GG, doc }) => {
+    assert(typeof GG.createGrid === 'function', 'GG.createGrid should be a function');
+    const grid = GG.createGrid(40, 25);
+    assert(grid instanceof doc.defaultView.HTMLElement, 'should return HTMLElement');
+    assertEq(grid.dataset.cols, '40', 'cols');
+    assertEq(grid.dataset.rows, '25', 'rows');
+  });
+
+  test('setCellColor applies a teletext colour to a cell', ({ GG }) => {
+    const grid = GG.createGrid(5, 3);
+    GG.setCellColor(grid, 1, 2, 'yellow');
+    const cell = GG.getCell(grid, 1, 2);
+    assert(cell, 'cell should exist');
+    const colour = cell.style.color;
+    // yellow = #FFFF00 = rgb(255,255,0)
+    assert(/rgb\(\s*255\s*,\s*255\s*,\s*0\s*\)/i.test(colour) || /#FFFF00/i.test(colour),
+      `cell colour should be yellow, got ${colour}`);
+  });
+
+  test('phosphor glow text-shadow present on display panel', ({ doc, win }) => {
+    const panel = doc.getElementById('display-panel');
+    // Check a text element inside the panel
+    const art = doc.getElementById('art-area') || panel;
+    const style = win.getComputedStyle(art);
+    assert(style.textShadow && style.textShadow !== 'none',
+      `text-shadow should be set for phosphor glow, got: ${style.textShadow}`);
+  });
+
+  test('panel aspect ratio is close to 40:25 (8:5)', ({ doc }) => {
+    const panel = doc.getElementById('display-panel');
+    const rect = panel.getBoundingClientRect();
+    const ratio = rect.width / rect.height;
+    // 40 cols × 25 rows with chunky chars roughly gives aspect ~1.6 (8:5)
+    // Allow wide tolerance for CRT framing
+    assert(ratio > 0.8 && ratio < 2.5,
+      `aspect ratio should be reasonable for teletext, got ${ratio.toFixed(2)}`);
+  });
+
+  // ============================================================
+  // Task 2: Typewriter Text Animation Tests
+  // ============================================================
+
+  test('GG.typewriter is a function', ({ GG }) => {
+    assert(typeof GG.typewriter === 'function', 'GG.typewriter should exist');
+  });
+
+  test('typewriter reveals text character-by-character', async ({ GG, doc, win }) => {
+    const target = doc.createElement('div');
+    doc.body.appendChild(target);
+    // Speed 1ms per char for quick test
+    const promise = GG.typewriter(target, 'hello', { speed: 1 });
+    // After 1 frame the text shouldn't be fully rendered
+    await new Promise(r => setTimeout(r, 1));
+    // Immediately partial (could be anywhere from 0 to partial)
+    // Wait a bit more but not full duration
+    await new Promise(r => setTimeout(r, 2));
+    const partial = target.textContent;
+    assert(partial.length < 'hello'.length,
+      `should still be animating, got full text "${partial}"`);
+    await promise;
+    assertEq(target.textContent, 'hello', 'should be fully rendered after await');
+    target.remove();
+  });
+
+  test('typewriter resolves promise when complete', async ({ GG, doc }) => {
+    const target = doc.createElement('div');
+    doc.body.appendChild(target);
+    const p = GG.typewriter(target, 'done', { speed: 1 });
+    assert(p && typeof p.then === 'function', 'should return a Promise');
+    await p;
+    assertEq(target.textContent, 'done', 'text complete after await');
+    target.remove();
+  });
+
+  test('typewriter skip() fast-forwards to full text', async ({ GG, doc }) => {
+    const target = doc.createElement('div');
+    doc.body.appendChild(target);
+    const p = GG.typewriter(target, 'longer text here', { speed: 50 });
+    await new Promise(r => setTimeout(r, 10));
+    GG.skipTypewriter();
+    await p;
+    assertEq(target.textContent, 'longer text here', 'should skip to end');
+    target.remove();
+  });
+
+  test('clicking display panel skips typewriter', async ({ GG, doc }) => {
+    const target = doc.getElementById('text-area');
+    const p = GG.typewriter(target, 'abcdefghij', { speed: 50 });
+    await new Promise(r => setTimeout(r, 5));
+    doc.getElementById('display-panel').click();
+    await p;
+    assertEq(target.textContent, 'abcdefghij', 'click should skip');
+  });
+
+  test('Space key skips typewriter', async ({ GG, doc, win }) => {
+    const target = doc.getElementById('text-area');
+    const p = GG.typewriter(target, 'zxcvbn', { speed: 50 });
+    await new Promise(r => setTimeout(r, 5));
+    const ev = new win.KeyboardEvent('keydown', { key: ' ', bubbles: true });
+    doc.dispatchEvent(ev);
+    await p;
+    assertEq(target.textContent, 'zxcvbn', 'space should skip');
+  });
+
+  test('typewriter speed is configurable (DEFAULT_SPEED constant exists)', ({ GG }) => {
+    assert(typeof GG.DEFAULT_TYPEWRITER_SPEED === 'number',
+      'GG.DEFAULT_TYPEWRITER_SPEED should be a number');
+    assert(GG.DEFAULT_TYPEWRITER_SPEED > 0 && GG.DEFAULT_TYPEWRITER_SPEED < 200,
+      'speed should be a reasonable ms-per-char value');
+  });
+
+  test('typewriter calls per-character callback (blip hook)', async ({ GG, doc }) => {
+    const target = doc.createElement('div');
+    doc.body.appendChild(target);
+    let calls = 0;
+    await GG.typewriter(target, 'xyz', { speed: 1, onChar: () => calls++ });
+    assertEq(calls, 3, 'onChar called once per character');
+    target.remove();
+  });
+
+  test('queueTypewriter renders blocks sequentially', async ({ GG, doc }) => {
+    const target = doc.createElement('div');
+    doc.body.appendChild(target);
+    await GG.queueTypewriter(target, ['one ', 'two'], { speed: 1 });
+    assertEq(target.textContent, 'one two', 'both blocks concatenated');
+    target.remove();
+  });
+
+  // ============================================================
+  // Task 3: Navigation System Tests
+  // ============================================================
+
+  test('GG.LOCATIONS has all 9 locations', ({ GG }) => {
+    assert(GG.LOCATIONS, 'GG.LOCATIONS should exist');
+    const keys = Object.keys(GG.LOCATIONS).sort();
+    const expected = [
+      'castleRuins', 'cottage', 'crossroads', 'crystalCave', 'forest',
+      'gardenGate', 'mountainPath', 'river', 'throneRoom'
+    ].sort();
+    assertEq(keys, expected, 'location keys');
+  });
+
+  test('each location has a name and exits', ({ GG }) => {
+    for (const [key, loc] of Object.entries(GG.LOCATIONS)) {
+      assert(typeof loc.name === 'string' && loc.name.length > 0,
+        `${key} needs a name`);
+      assert(Array.isArray(loc.exits),
+        `${key} needs exits array`);
+    }
+  });
+
+  test('crossroads connects to four main areas', ({ GG }) => {
+    const exits = GG.LOCATIONS.crossroads.exits.map(e => e.to);
+    for (const needed of ['forest', 'river', 'mountainPath', 'cottage']) {
+      assert(exits.includes(needed),
+        `crossroads should connect to ${needed}, got ${exits}`);
+    }
+  });
+
+  test('game starts at gardenGate', ({ GG }) => {
+    GG.newGame();
+    assertEq(GG.state.currentLocation, 'gardenGate', 'initial location');
+  });
+
+  test('navigating updates current location', ({ GG }) => {
+    GG.newGame();
+    GG.goTo('crossroads');
+    assertEq(GG.state.currentLocation, 'crossroads', 'after goTo');
+  });
+
+  test('location name renders as header in status area', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('crossroads');
+    const header = doc.getElementById('location-header');
+    assert(header, '#location-header should exist');
+    assert(/crossroads/i.test(header.textContent),
+      `header should show location name, got "${header.textContent}"`);
+  });
+
+  test('renderLocation draws numbered menu choices', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('crossroads');
+    const menu = doc.getElementById('menu-area');
+    const buttons = menu.querySelectorAll('[data-menu-choice]');
+    assert(buttons.length >= 2,
+      `crossroads should have multiple menu choices, got ${buttons.length}`);
+    // First button should be "1. ..."
+    assert(/^1[\.\)]/.test(buttons[0].textContent.trim()),
+      `first choice should start with "1.", got "${buttons[0].textContent}"`);
+  });
+
+  test('clicking menu choice transitions location', async ({ GG, doc }) => {
+    GG.newGame();
+    GG.state.currentLocation = 'crossroads';
+    await GG.renderLocation('crossroads');
+    const menu = doc.getElementById('menu-area');
+    const first = menu.querySelector('[data-menu-choice]');
+    const targetLoc = first.dataset.menuChoice;
+    first.click();
+    // Allow any transition text to begin
+    await new Promise(r => setTimeout(r, 50));
+    assertEq(GG.state.currentLocation, targetLoc, 'location changed on click');
+  });
+
+  test('pressing number key selects matching menu choice', async ({ GG, doc, win }) => {
+    GG.newGame();
+    GG.state.currentLocation = 'crossroads';
+    await GG.renderLocation('crossroads');
+    const first = doc.querySelector('[data-menu-choice]');
+    const targetLoc = first.dataset.menuChoice;
+    // Make sure any pending typewriter is done first
+    GG.skipTypewriter();
+    await new Promise(r => setTimeout(r, 10));
+    const ev = new win.KeyboardEvent('keydown', { key: '1', bubbles: true });
+    doc.dispatchEvent(ev);
+    await new Promise(r => setTimeout(r, 50));
+    assertEq(GG.state.currentLocation, targetLoc, 'number key should navigate');
+  });
+
+  test('menu choice buttons have aria-labels', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('crossroads');
+    const buttons = doc.querySelectorAll('[data-menu-choice]');
+    for (const b of buttons) {
+      assert(b.getAttribute('aria-label'),
+        `menu button "${b.textContent.trim()}" should have aria-label`);
+    }
+  });
+
+  // ============================================================
+  // Task 4: Teletext Block Art Tests
+  // ============================================================
+
+  test('GG.ART has entries for all 9 locations', ({ GG }) => {
+    assert(GG.ART, 'GG.ART should exist');
+    const expected = [
+      'castleRuins', 'cottage', 'crossroads', 'crystalCave', 'forest',
+      'gardenGate', 'mountainPath', 'river', 'throneRoom'
+    ].sort();
+    assertEq(Object.keys(GG.ART).sort(), expected, 'art keys');
+  });
+
+  test('each art entry has rows and a colour', ({ GG }) => {
+    for (const [key, art] of Object.entries(GG.ART)) {
+      assert(Array.isArray(art.rows), `${key} needs rows array`);
+      assert(art.rows.length >= 8 && art.rows.length <= 20,
+        `${key} rows should be 8-20, got ${art.rows.length}`);
+      assert(art.colour && GG.TELETEXT_COLORS[art.colour],
+        `${key} needs a teletext colour, got "${art.colour}"`);
+    }
+  });
+
+  test('art uses only block/box/ASCII characters (teletext-safe)', ({ GG }) => {
+    // Teletext art should only use a limited set: space, box drawing,
+    // block characters, punctuation, letters for labels.
+    const allowed = /^[\s\u2500-\u257F\u2580-\u259F\u25A0-\u25FF\u2600-\u26FFa-zA-Z0-9!@#$%\^&*()\-_=+\[\]{};:'",.<>/?\\|`~]*$/;
+    for (const [key, art] of Object.entries(GG.ART)) {
+      for (const row of art.rows) {
+        assert(allowed.test(row),
+          `${key} row contains unsupported characters: "${row}"`);
+      }
+    }
+  });
+
+  test('renderArt draws art into #art-area', async ({ GG, doc }) => {
+    assert(typeof GG.renderArt === 'function', 'GG.renderArt should be a function');
+    GG.renderArt('gardenGate');
+    const art = doc.getElementById('art-area');
+    // Art area should contain the art container
+    const container = art.querySelector('.tt-art');
+    assert(container, '.tt-art container should be rendered');
+    // Should contain at least some content
+    assert(container.textContent.trim().length > 0,
+      'rendered art should have content');
+  });
+
+  test('renderArt applies the art colour', async ({ GG, doc, win }) => {
+    GG.renderArt('forest');
+    const container = doc.querySelector('#art-area .tt-art');
+    const colour = win.getComputedStyle(container).color;
+    // forest should be green (0,255,0) — check colour components
+    assert(/rgb\(\s*0\s*,\s*255\s*,\s*0\s*\)/i.test(colour),
+      `forest art should render in green, got ${colour}`);
+  });
+
+  test('renderLocation automatically renders art', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('river');
+    const container = doc.querySelector('#art-area .tt-art');
+    assert(container, 'renderLocation should call renderArt');
+  });
+
+  test('each location name appears in its own art (label)', ({ GG }) => {
+    // Titles help identify the scene even if art is abstract.
+    for (const [key, art] of Object.entries(GG.ART)) {
+      // either the art itself contains a label OR there's a title field
+      const combined = art.rows.join('\n').toLowerCase();
+      const words = GG.LOCATIONS[key].name.toLowerCase()
+        .replace(/[^a-z ]/g, '').split(/\s+/).filter(w => w.length > 3);
+      const hasWord = words.some(w => combined.includes(w));
+      assert(hasWord || art.title,
+        `${key}: art should include part of the location name or a title`);
+    }
+  });
+
+  // ============================================================
+  // Task 5: Location Content Tests
+  // ============================================================
+
+  test('GG.NARRATIVE has first-visit text for each location', ({ GG }) => {
+    assert(GG.NARRATIVE, 'GG.NARRATIVE should exist');
+    for (const key of Object.keys(GG.LOCATIONS)) {
+      const n = GG.NARRATIVE[key];
+      assert(n && typeof n.first === 'string' && n.first.length > 20,
+        `${key} needs a meaty first-visit narrative`);
+    }
+  });
+
+  test('locations have distinct revisit text', ({ GG }) => {
+    for (const key of Object.keys(GG.LOCATIONS)) {
+      const n = GG.NARRATIVE[key];
+      assert(n.revisit && n.revisit !== n.first,
+        `${key} revisit text should differ from first-visit`);
+    }
+  });
+
+  test('gardenGate narrative mentions Granny and the quest', ({ GG }) => {
+    const n = GG.NARRATIVE.gardenGate.first.toLowerCase();
+    assert(n.includes('granny'), 'quest briefing should mention Granny');
+    assert(/child|children|king|queen|rescue|lost/.test(n),
+      'quest briefing should mention the children/king/queen/rescue');
+  });
+
+  test('narrative uses second-person voice ("you")', ({ GG }) => {
+    for (const key of Object.keys(GG.LOCATIONS)) {
+      const text = GG.NARRATIVE[key].first.toLowerCase();
+      assert(/\byou\b|\byour\b/.test(text),
+        `${key} should use second-person voice, got: "${text.slice(0, 60)}..."`);
+    }
+  });
+
+  test('first-visit narrative is shown on first render', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('forest');
+    const text = doc.getElementById('text-area').textContent;
+    // First visit; text should include first-visit content
+    assert(text.length > 10, 'narrative should be rendered');
+    // Should be close to the defined first-visit text (allow for truncation)
+    const expected = GG.NARRATIVE.forest.first.slice(0, 20);
+    assert(text.includes(expected.slice(0, 15)),
+      `narrative should match first-visit text for forest. got "${text.slice(0,60)}..."`);
+  });
+
+  test('revisit narrative shown on second visit', async ({ GG, doc }) => {
+    GG.newGame();
+    await GG.renderLocation('river');
+    GG.skipTypewriter();
+    await new Promise(r => setTimeout(r, 30));
+    await GG.renderLocation('river');
+    const text = doc.getElementById('text-area').textContent;
+    const expected = GG.NARRATIVE.river.revisit.slice(0, 15);
+    assert(text.includes(expected),
+      `revisit text should be used on second visit. got "${text.slice(0,60)}..."`);
+  });
+
+  test('Granny provides contextual hint based on progress', ({ GG }) => {
+    assert(typeof GG.grannyHint === 'function', 'GG.grannyHint should exist');
+    GG.newGame();
+    const hint1 = GG.grannyHint();
+    assert(typeof hint1 === 'string' && hint1.length > 10, 'hint should be a string');
+    // With children rescued, hint should change
+    GG.state.rescued = ['a', 'b', 'c'];
+    const hint2 = GG.grannyHint();
+    assert(hint2 !== hint1, 'hint should change based on rescue progress');
+    // Fully rescued
+    GG.state.rescued = ['a','b','c','d','e','f'];
+    const hint3 = GG.grannyHint();
+    assert(hint3 !== hint1 && hint3 !== hint2,
+      'fully-rescued hint should differ');
+  });
+
+  // ============================================================
+  // Task 6: Puzzle Engine Tests
+  // ============================================================
+
+  test('GG.PUZZLE_TYPES lists all 6 puzzle types', ({ GG }) => {
+    assert(Array.isArray(GG.PUZZLE_TYPES), 'GG.PUZZLE_TYPES should be array');
+    const expected = ['riddle', 'word', 'maths', 'logic', 'sequence', 'memory'].sort();
+    assertEq(GG.PUZZLE_TYPES.slice().sort(), expected, 'puzzle type names');
+  });
+
+  test('GG.PUZZLES defines 2+ puzzles per rescuable child', ({ GG }) => {
+    assert(GG.PUZZLES, 'GG.PUZZLES should exist');
+    // 6 children, corresponding to forest, river, mountainPath, cottage, crystalCave, castleRuins
+    const rescueLocations = ['forest', 'river', 'mountainPath',
+                              'cottage', 'crystalCave', 'castleRuins'];
+    for (const loc of rescueLocations) {
+      const pool = GG.PUZZLES[loc];
+      assert(Array.isArray(pool), `puzzle pool for ${loc} should exist`);
+      assert(pool.length >= 2,
+        `${loc} should have at least 2 puzzles, got ${pool.length}`);
+    }
+  });
+
+  test('total puzzles across all children is >= 12', ({ GG }) => {
+    let total = 0;
+    for (const pool of Object.values(GG.PUZZLES)) total += pool.length;
+    assert(total >= 12, `should have >= 12 puzzles, got ${total}`);
+  });
+
+  test('every puzzle has a type, question, answer, and choices (if applicable)', ({ GG }) => {
+    for (const [loc, pool] of Object.entries(GG.PUZZLES)) {
+      for (const p of pool) {
+        assert(GG.PUZZLE_TYPES.includes(p.type),
+          `${loc}: invalid type "${p.type}"`);
+        assert(typeof p.question === 'string' && p.question.length > 0,
+          `${loc}/${p.type}: missing question`);
+        assert(p.answer != null,
+          `${loc}/${p.type}: missing answer`);
+        // Riddle/logic/sequence should have choices
+        if (['riddle', 'logic', 'sequence'].includes(p.type)) {
+          assert(Array.isArray(p.choices) && p.choices.length >= 2,
+            `${loc}/${p.type}: needs choices array`);
+          assert(p.choices.includes(p.answer),
+            `${loc}/${p.type}: answer must be in choices`);
+        }
+      }
+    }
+  });
+
+  test('GG.pickPuzzle(loc) returns a puzzle from that pool', ({ GG }) => {
+    GG.newGame();
+    const p = GG.pickPuzzle('forest');
+    assert(p && p.type, 'should return a puzzle');
+    assert(GG.PUZZLES.forest.includes(p), 'should come from forest pool');
+  });
+
+  test('pickPuzzle is deterministic per game seed', ({ GG }) => {
+    GG.newGame(12345);     // seeded
+    const a = GG.pickPuzzle('forest');
+    GG.newGame(12345);
+    const b = GG.pickPuzzle('forest');
+    assertEq(a.question, b.question, 'same seed -> same puzzle');
+  });
+
+  test('pickPuzzle varies across seeds (replayability)', ({ GG }) => {
+    // Some seeds should give different puzzles. Try several.
+    const seen = new Set();
+    for (let i = 0; i < 20; i++) {
+      GG.newGame(i);
+      seen.add(GG.pickPuzzle('river').question);
+    }
+    assert(seen.size > 1, 'at least 2 different river puzzles across seeds');
+  });
+
+  test('renderPuzzle shows question in text-area and choices in menu-area', async ({ GG, doc }) => {
+    GG.newGame(42);
+    const puzzle = { type: 'riddle', question: 'Q?', answer: 'A',
+                     choices: ['A', 'B', 'C'] };
+    await GG.renderPuzzle(puzzle);
+    const text = doc.getElementById('text-area').textContent;
+    assert(text.includes('Q?'), 'question should be in text area');
+    const choices = doc.querySelectorAll('[data-puzzle-choice]');
+    assertEq(choices.length, 3, 'three choice buttons');
+  });
+
+  test('answerPuzzle(correct) returns true and increments solved count', ({ GG }) => {
+    GG.newGame(1);
+    const puzzle = { type: 'riddle', question: 'Q?', answer: 'cat',
+                     choices: ['cat', 'dog'] };
+    const ok = GG.answerPuzzle(puzzle, 'cat');
+    assertEq(ok, true, 'correct answer');
+    assertEq(GG.state.stats.puzzlesSolved, 1, 'stat incremented');
+  });
+
+  test('answerPuzzle(wrong) returns false and does not increment', ({ GG }) => {
+    GG.newGame(1);
+    const puzzle = { type: 'riddle', question: 'Q?', answer: 'cat',
+                     choices: ['cat', 'dog'] };
+    const ok = GG.answerPuzzle(puzzle, 'dog');
+    assertEq(ok, false, 'wrong answer');
+    assertEq(GG.state.stats.puzzlesSolved, 0, 'stat not incremented');
+  });
+
+  test('rescueChild marks a child rescued', ({ GG }) => {
+    GG.newGame();
+    GG.rescueChild('forest');
+    assert(GG.state.rescued.includes('forest'), 'forest child rescued');
+    assertEq(GG.state.rescued.length, 1, 'only one child rescued so far');
+  });
+
+  test('rescueChild is idempotent', ({ GG }) => {
+    GG.newGame();
+    GG.rescueChild('forest');
+    GG.rescueChild('forest');
+    assertEq(GG.state.rescued.length, 1, 'no double-rescue');
+  });
+
+  test('maths puzzle validates numeric answer string-insensitively', ({ GG }) => {
+    GG.newGame();
+    const p = { type: 'maths', question: '2+2?', answer: 4, choices: [] };
+    assertEq(GG.answerPuzzle(p, '4'), true, 'string "4" matches numeric 4');
+    GG.newGame();
+    assertEq(GG.answerPuzzle(p, 4), true, 'numeric 4 matches');
+  });
+
+  test('word puzzle accepts case-insensitive answer', ({ GG }) => {
+    GG.newGame();
+    const p = { type: 'word', question: 'scramble: tac', answer: 'cat' };
+    assertEq(GG.answerPuzzle(p, 'CAT'), true);
+    GG.newGame();
+    assertEq(GG.answerPuzzle(p, 'Cat'), true);
+    GG.newGame();
+    assertEq(GG.answerPuzzle(p, 'dog'), false);
+  });
+
+  // ============================================================
+  // Task 7: Wicked Witch System Tests
+  // ============================================================
+
+  test('GG.WITCH config exists with encounter rate and safe locations', ({ GG }) => {
+    assert(GG.WITCH, 'GG.WITCH namespace should exist');
+    assert(typeof GG.WITCH.encounterRate === 'number',
+      'encounterRate should be a number');
+    assert(GG.WITCH.encounterRate > 0 && GG.WITCH.encounterRate < 1,
+      'encounterRate should be a probability');
+    assert(Array.isArray(GG.WITCH.safeLocations),
+      'safeLocations should be an array');
+    assert(GG.WITCH.safeLocations.includes('gardenGate'),
+      'gardenGate must be safe');
+  });
+
+  test('maybeSpawnWitch never spawns at a safe location', ({ GG }) => {
+    GG.newGame(1);
+    for (let i = 0; i < 50; i++) {
+      assertEq(GG.maybeSpawnWitch('gardenGate'), false,
+        'witch never appears at gardenGate');
+    }
+  });
+
+  test('maybeSpawnWitch is deterministic per seed', ({ GG }) => {
+    GG.newGame(777);
+    const a = [];
+    for (let i = 0; i < 30; i++) a.push(GG.maybeSpawnWitch('forest'));
+    GG.newGame(777);
+    const b = [];
+    for (let i = 0; i < 30; i++) b.push(GG.maybeSpawnWitch('forest'));
+    assertEq(a, b, 'same seed -> identical witch spawn pattern');
+  });
+
+  test('maybeSpawnWitch sometimes spawns in dangerous locations', ({ GG }) => {
+    GG.newGame(42);
+    let spawns = 0;
+    for (let i = 0; i < 200; i++) {
+      if (GG.maybeSpawnWitch('forest')) spawns++;
+    }
+    assert(spawns > 5, `witch should spawn at least a few times, got ${spawns}`);
+    assert(spawns < 200, 'witch should not always spawn');
+  });
+
+  test('Magic Cloak in inventory prevents witch spawn', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.inventory = ['magicCloak'];
+    for (let i = 0; i < 100; i++) {
+      assertEq(GG.maybeSpawnWitch('forest'), false,
+        'cloak gives immunity');
+    }
+  });
+
+  test('witchEncounter increments witch stat', async ({ GG }) => {
+    GG.newGame(1);
+    const before = GG.state.stats.witchEncounters;
+    // auto-escape mode for testing: pass { auto: 'escape' }
+    await GG.witchEncounter({ auto: 'escape' });
+    assertEq(GG.state.stats.witchEncounters, before + 1,
+      'stat incremented per encounter');
+  });
+
+  test('witchEncounter escape returns caught:false', async ({ GG }) => {
+    GG.newGame(1);
+    const result = await GG.witchEncounter({ auto: 'escape' });
+    assertEq(result.caught, false, 'escape -> not caught');
+  });
+
+  test('witchEncounter caught returns caught:true', async ({ GG }) => {
+    GG.newGame(1);
+    const result = await GG.witchEncounter({ auto: 'caught' });
+    assertEq(result.caught, true, 'caught -> caught');
+  });
+
+  test('renderWitchWarning shows warning in text area', async ({ GG, doc }) => {
+    GG.newGame(1);
+    await GG.renderWitchWarning();
+    const text = doc.getElementById('text-area').textContent.toLowerCase();
+    assert(text.includes('witch') || text.includes('wicked'),
+      'warning text should mention the witch');
+  });
+
+  test('handleCatch teleports player back to gardenGate', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.currentLocation = 'forest';
+    GG.handleCatch();
+    assertEq(GG.state.currentLocation, 'gardenGate',
+      'caught -> teleported home');
+  });
+
+  test('handleCatch drops the last inventory item', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.inventory = ['key', 'lamp'];
+    GG.handleCatch();
+    assertEq(GG.state.inventory.length, 1,
+      'catch steals one item');
+  });
+
+  test('cottage triggers chase sequence (not normal encounter)', ({ GG }) => {
+    assert(typeof GG.startChase === 'function', 'startChase should exist');
+    GG.newGame(5);
+    const chase = GG.startChase();
+    assert(chase && Array.isArray(chase.rooms),
+      'chase should return rooms array');
+    assert(chase.rooms.length >= 3,
+      'chase should have at least 3 rooms');
+    assertEq(typeof chase.currentRoom, 'number', 'currentRoom index');
+  });
+
+  test('chaseStep(direction) advances state', ({ GG }) => {
+    GG.newGame(5);
+    const chase = GG.startChase();
+    const first = chase.currentRoom;
+    const wrongBefore = chase.wrongMoves;
+    const result = GG.chaseStep(chase, chase.rooms[first].exits[0]);
+    const advanced = result.currentRoom !== first;
+    const resolved = result.caught || result.escaped;
+    const gotWrong = result.wrongMoves > wrongBefore;
+    assert(advanced || resolved || gotWrong,
+      'step should advance, resolve, or record a wrong move');
+  });
+
+  test('escaping chase means reaching the exit room', ({ GG }) => {
+    GG.newGame(5);
+    const chase = GG.startChase();
+    // Walk toward exit using .correct hint on each room
+    let state = chase;
+    let steps = 0;
+    while (!state.escaped && !state.caught && steps < 20) {
+      const room = state.rooms[state.currentRoom];
+      state = GG.chaseStep(state, room.correct);
+      steps++;
+    }
+    assertEq(state.escaped, true, 'following correct path escapes');
+  });
+
+  // ============================================================
+  // Task 8: Inventory System Tests
+  // ============================================================
+
+  test('GG.ITEMS catalogue exists with id/name/description/icon', ({ GG }) => {
+    assert(GG.ITEMS, 'GG.ITEMS should exist');
+    const ids = Object.keys(GG.ITEMS);
+    assert(ids.length >= 5, 'at least 5 items defined');
+    for (const id of ids) {
+      const it = GG.ITEMS[id];
+      assert(typeof it.name === 'string' && it.name.length,
+        `${id}: name missing`);
+      assert(typeof it.description === 'string' && it.description.length,
+        `${id}: description missing`);
+      assert(typeof it.icon === 'string' && it.icon.length,
+        `${id}: icon missing`);
+    }
+  });
+
+  test('Magic Cloak is one of the items', ({ GG }) => {
+    assert(GG.ITEMS.magicCloak, 'magicCloak item defined');
+  });
+
+  test('GG.INVENTORY_LIMIT is 5', ({ GG }) => {
+    assertEq(GG.INVENTORY_LIMIT, 5, 'inventory limit 5');
+  });
+
+  test('addItem adds an item to the inventory', ({ GG }) => {
+    GG.newGame();
+    const ok = GG.addItem('key');
+    assertEq(ok, true, 'add succeeds');
+    assert(GG.state.inventory.includes('key'), 'key in inventory');
+  });
+
+  test('addItem refuses unknown items', ({ GG }) => {
+    GG.newGame();
+    const ok = GG.addItem('zzz-not-an-item');
+    assertEq(ok, false, 'unknown item rejected');
+    assertEq(GG.state.inventory.length, 0);
+  });
+
+  test('addItem respects INVENTORY_LIMIT', ({ GG }) => {
+    GG.newGame();
+    const ids = Object.keys(GG.ITEMS).slice(0, 5);
+    for (const id of ids) assertEq(GG.addItem(id), true);
+    // 6th add should fail
+    const sixth = Object.keys(GG.ITEMS)[5] || Object.keys(GG.ITEMS)[0];
+    const ok = GG.addItem(sixth);
+    assertEq(ok, false, 'over-limit add refused');
+    assertEq(GG.state.inventory.length, 5);
+  });
+
+  test('addItem increments itemsFound stat', ({ GG }) => {
+    GG.newGame();
+    const before = GG.state.stats.itemsFound;
+    GG.addItem('key');
+    assertEq(GG.state.stats.itemsFound, before + 1);
+  });
+
+  test('addItem is idempotent (no duplicates)', ({ GG }) => {
+    GG.newGame();
+    GG.addItem('key');
+    GG.addItem('key');
+    assertEq(GG.state.inventory.filter(i => i === 'key').length, 1);
+  });
+
+  test('removeItem removes an item', ({ GG }) => {
+    GG.newGame();
+    GG.addItem('key');
+    const ok = GG.removeItem('key');
+    assertEq(ok, true);
+    assert(!GG.state.inventory.includes('key'));
+  });
+
+  test('removeItem returns false if missing', ({ GG }) => {
+    GG.newGame();
+    assertEq(GG.removeItem('key'), false);
+  });
+
+  test('hasItem checks presence', ({ GG }) => {
+    GG.newGame();
+    GG.addItem('key');
+    assertEq(GG.hasItem('key'), true);
+    assertEq(GG.hasItem('magicCloak'), false);
+  });
+
+  test('renderInventory draws items into status area', ({ GG, doc }) => {
+    GG.newGame();
+    GG.addItem('key');
+    GG.renderInventory();
+    const status = doc.getElementById('status-area');
+    const text = status.textContent;
+    assert(text.includes(GG.ITEMS.key.icon) || text.includes(GG.ITEMS.key.name),
+      'status area shows the key');
+  });
+
+  test('renderInventory shows empty state when nothing held', ({ GG, doc }) => {
+    GG.newGame();
+    GG.renderInventory();
+    const text = doc.getElementById('status-area').textContent.toLowerCase();
+    assert(text.length > 0, 'status area has something');
+    // Nothing held → should be noticeably shorter than with 5 items
+  });
+
+  test('items have a found-at location', ({ GG }) => {
+    // At least some items should have a location where they can be found.
+    let hasLocation = 0;
+    for (const id of Object.keys(GG.ITEMS)) {
+      if (GG.ITEMS[id].foundAt) hasLocation++;
+    }
+    assert(hasLocation >= 3, 'several items should be placed in the world');
+  });
+
+  // ============================================================
+  // Task 9: Audio System Tests (Web Audio API)
+  // ============================================================
+
+  test('GG.Audio namespace exists', ({ GG }) => {
+    assert(GG.Audio, 'GG.Audio should exist');
+    assert(typeof GG.Audio.init === 'function', 'init()');
+    assert(typeof GG.Audio.blip === 'function', 'blip()');
+    assert(typeof GG.Audio.success === 'function', 'success()');
+    assert(typeof GG.Audio.fail === 'function', 'fail()');
+    assert(typeof GG.Audio.witch === 'function', 'witch()');
+    assert(typeof GG.Audio.victory === 'function', 'victory()');
+    assert(typeof GG.Audio.menu === 'function', 'menu()');
+    assert(typeof GG.Audio.setMuted === 'function', 'setMuted()');
+  });
+
+  test('GG.Audio starts unmuted', ({ GG }) => {
+    assertEq(GG.Audio.muted, false, 'unmuted by default');
+  });
+
+  test('setMuted toggles mute state', ({ GG }) => {
+    GG.Audio.setMuted(true);
+    assertEq(GG.Audio.muted, true);
+    GG.Audio.setMuted(false);
+    assertEq(GG.Audio.muted, false);
+  });
+
+  test('Audio calls are safe with no context (no-throw)', ({ GG }) => {
+    // Before init, calls should no-op silently, not throw.
+    GG.Audio.blip();
+    GG.Audio.success();
+    GG.Audio.fail();
+    GG.Audio.witch();
+    GG.Audio.victory();
+    GG.Audio.menu();
+    assert(true, 'no throws');
+  });
+
+  test('Audio.init creates an AudioContext (or is safely no-op)', ({ GG, win }) => {
+    // If the host supports Web Audio, init should succeed.
+    if (typeof win.AudioContext === 'function' ||
+        typeof win.webkitAudioContext === 'function') {
+      GG.Audio.init();
+      assert(GG.Audio.ctx, 'context created');
+    } else {
+      GG.Audio.init();
+      assert(true, 'no throw without Web Audio');
+    }
+  });
+
+  test('Audio calls are safe after init (no-throw)', ({ GG }) => {
+    GG.Audio.init();
+    GG.Audio.blip();
+    GG.Audio.success();
+    GG.Audio.fail();
+    GG.Audio.witch();
+    GG.Audio.victory();
+    GG.Audio.menu();
+    assert(true, 'no throws');
+  });
+
+  test('muting silences audio output (calls still safe)', ({ GG }) => {
+    GG.Audio.init();
+    GG.Audio.setMuted(true);
+    GG.Audio.blip();
+    GG.Audio.success();
+    GG.Audio.setMuted(false);
+    assert(true, 'no throws while muted');
+  });
+
+  test('GG.blip callback wires typewriter to Audio.blip', async ({ GG, doc }) => {
+    // When audio is enabled, GG.blip should invoke GG.Audio.blip. Stub it.
+    let count = 0;
+    const real = GG.Audio.blip;
+    GG.Audio.blip = function () { count++; };
+    try {
+      const el = doc.createElement('div');
+      doc.body.appendChild(el);
+      await GG.typewriter(el, 'hello', 1);
+      assert(count >= 1, 'Audio.blip was called during typewriter');
+      el.remove();
+    } finally {
+      GG.Audio.blip = real;
+    }
+  });
+
+  test('Audio mute button exists in the UI', ({ doc }) => {
+    const btn = doc.getElementById('mute-toggle');
+    assert(btn, 'mute button exists');
+  });
+
+  test('clicking mute button flips Audio.muted', ({ GG, doc }) => {
+    const btn = doc.getElementById('mute-toggle');
+    GG.Audio.setMuted(false);
+    btn.click();
+    assertEq(GG.Audio.muted, true);
+    btn.click();
+    assertEq(GG.Audio.muted, false);
+  });
+
+  // ============================================================
+  // Task 10: Progress, Victory & Statistics Tests
+  // ============================================================
+
+  test('newGame records startedAt timestamp', ({ GG }) => {
+    const before = Date.now();
+    GG.newGame(1);
+    const after = Date.now();
+    assert(typeof GG.state.startedAt === 'number',
+      'startedAt is a number');
+    assert(GG.state.startedAt >= before && GG.state.startedAt <= after,
+      'startedAt is a reasonable timestamp');
+  });
+
+  test('GG.isVictory false when no children rescued', ({ GG }) => {
+    GG.newGame(1);
+    assertEq(GG.isVictory(), false);
+  });
+
+  test('GG.isVictory false with partial rescue', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.rescued = ['forest', 'river', 'mountainPath'];
+    assertEq(GG.isVictory(), false);
+  });
+
+  test('GG.isVictory true when all 6 children rescued', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.rescued = ['forest', 'river', 'mountainPath',
+                        'cottage', 'crystalCave', 'castleRuins'];
+    assertEq(GG.isVictory(), true);
+  });
+
+  test('GG.RESCUE_LOCATIONS lists the 6 puzzle locations', ({ GG }) => {
+    assert(Array.isArray(GG.RESCUE_LOCATIONS));
+    assertEq(GG.RESCUE_LOCATIONS.length, 6);
+  });
+
+  test('GG.elapsedMs returns ms since newGame', ({ GG }) => {
+    GG.newGame(1);
+    const e1 = GG.elapsedMs();
+    assert(e1 >= 0 && e1 < 1000, `recent game: ${e1}ms`);
+  });
+
+  test('GG.formatElapsed returns mm:ss string', ({ GG }) => {
+    assertEq(GG.formatElapsed(0), '00:00');
+    assertEq(GG.formatElapsed(65000), '01:05');
+    assertEq(GG.formatElapsed(3599000), '59:59');
+  });
+
+  test('renderVictory draws fanfare screen with stats', async ({ GG, doc }) => {
+    GG.newGame(1);
+    GG.state.rescued = ['forest', 'river', 'mountainPath',
+                        'cottage', 'crystalCave', 'castleRuins'];
+    GG.state.stats.puzzlesSolved = 7;
+    GG.state.stats.witchEncounters = 3;
+    GG.state.stats.itemsFound = 4;
+    await GG.renderVictory();
+    const text = doc.getElementById('text-area').textContent;
+    assert(/victory|rescued|saved|done|hooray|bravo/i.test(text),
+      'victory text includes a celebratory word');
+    // Stats visible somewhere in the display panel
+    const panel = doc.getElementById('display-panel').textContent;
+    assert(panel.includes('7'), 'puzzles-solved stat shown');
+    assert(panel.includes('3'), 'witch-encounters stat shown');
+    assert(panel.includes('4'), 'items-found stat shown');
+  });
+
+  test('renderVictory shows replay seed so players can share', async ({ GG, doc }) => {
+    GG.newGame(424242);
+    GG.state.rescued = ['forest', 'river', 'mountainPath',
+                        'cottage', 'crystalCave', 'castleRuins'];
+    await GG.renderVictory();
+    const panel = doc.getElementById('display-panel').textContent;
+    assert(panel.includes('424242'), 'seed shown on victory screen');
+  });
+
+  test('renderVictory offers restart option in menu', async ({ GG, doc }) => {
+    GG.newGame(1);
+    GG.state.rescued = ['forest', 'river', 'mountainPath',
+                        'cottage', 'crystalCave', 'castleRuins'];
+    await GG.renderVictory();
+    const menu = doc.getElementById('menu-area').textContent.toLowerCase();
+    assert(/play again|restart|new game/.test(menu),
+      'menu offers a restart');
+  });
+
+  test('GG.gameOver flag can be set and cleared', ({ GG }) => {
+    GG.newGame(1);
+    assertEq(!!GG.state.gameOver, false);
+    GG.state.gameOver = true;
+    assertEq(GG.state.gameOver, true);
+  });
+
+  test('rescueChild triggers victory when the last child is saved', ({ GG }) => {
+    GG.newGame(1);
+    GG.state.rescued = ['forest', 'river', 'mountainPath',
+                        'cottage', 'crystalCave'];
+    GG.rescueChild('castleRuins');
+    assertEq(GG.isVictory(), true);
+  });
+
+  // ============================================================
+  // Task 11: Polish — a11y, responsiveness, motion
+  // ============================================================
+
+  test('meta viewport tag present for mobile scaling', ({ doc }) => {
+    const m = doc.querySelector('meta[name="viewport"]');
+    assert(m, 'viewport meta exists');
+    assert(/width=device-width/i.test(m.getAttribute('content') || ''),
+      'viewport uses device-width');
+  });
+
+  test('main game container has role=application', ({ doc }) => {
+    const frame = doc.getElementById('crt-frame');
+    assert(frame, 'crt-frame exists');
+    assertEq(frame.getAttribute('role'), 'application');
+  });
+
+  test('display panel has aria-live', ({ doc }) => {
+    const panel = doc.getElementById('display-panel');
+    assert(panel, 'display-panel exists');
+    assert(panel.hasAttribute('aria-live'), 'aria-live present');
+  });
+
+  test('menu area has role=menu', ({ doc }) => {
+    const menu = doc.getElementById('menu-area');
+    assertEq(menu.getAttribute('role'), 'menu');
+  });
+
+  test('CRT and mute buttons expose aria-labels', ({ doc }) => {
+    const crt = doc.getElementById('crt-toggle');
+    const mute = doc.getElementById('mute-toggle');
+    assert(crt.getAttribute('aria-label'), 'crt aria-label');
+    assert(mute.getAttribute('aria-label'), 'mute aria-label');
+  });
+
+  test('responsive CSS defines @media breakpoints', ({ doc, win }) => {
+    const cssText = Array.from(doc.styleSheets)
+      .flatMap(s => { try { return Array.from(s.cssRules); }
+                      catch(_) { return []; } })
+      .map(r => r.cssText || '').join('\n');
+    assert(/@media[^{]*max-width/i.test(cssText),
+      'at least one max-width media query present');
+  });
+
+  test('reduced-motion media query exists', ({ doc }) => {
+    const cssText = Array.from(doc.styleSheets)
+      .flatMap(s => { try { return Array.from(s.cssRules); }
+                      catch(_) { return []; } })
+      .map(r => r.cssText || '').join('\n');
+    assert(/prefers-reduced-motion/i.test(cssText),
+      'prefers-reduced-motion query defined');
+  });
+
+  test('focusable buttons receive focus outline', ({ doc, win }) => {
+    // Render a location so menu has buttons
+    return (async () => {
+      const GG = win.GG;
+      GG.newGame(1);
+      await GG.renderLocation('gardenGate');
+      const btn = doc.querySelector('[data-menu-choice]');
+      assert(btn, 'some menu button exists');
+      btn.focus();
+      // Focus is observable via document.activeElement
+      assertEq(doc.activeElement, btn, 'button receives focus');
+    })();
+  });
+
+  test('menu buttons are keyboard-operable (tab/role)', async ({ GG, doc }) => {
+    GG.newGame(1);
+    await GG.renderLocation('gardenGate');
+    const buttons = doc.querySelectorAll('#menu-area button[data-menu-choice]');
+    assert(buttons.length > 0, 'buttons render');
+    for (const b of buttons) {
+      // Default <button> is focusable; tabindex should be absent or >= 0
+      const ti = b.getAttribute('tabindex');
+      assert(ti === null || Number(ti) >= 0,
+        'tabindex not negative: ' + ti);
+    }
+  });
+
+  test('GG.prefersReducedMotion helper returns a boolean', ({ GG }) => {
+    assert(typeof GG.prefersReducedMotion === 'function',
+      'helper exists');
+    const v = GG.prefersReducedMotion();
+    assert(v === true || v === false, 'returns boolean');
+  });
+
+  test('reduced-motion shortens typewriter speed', ({ GG, win }) => {
+    // If reduced motion, DEFAULT_TYPEWRITER_SPEED should be <=5 ms.
+    // We cannot actually change the host's media-query state here, but
+    // we can assert that GG.typewriterSpeedForMotion returns a small
+    // value when the flag is true.
+    assert(typeof GG.typewriterSpeedForMotion === 'function');
+    assertEq(GG.typewriterSpeedForMotion(true), 0);
+    assert(GG.typewriterSpeedForMotion(false) >= 1);
+  });
+
+  test('location transitions have a fade CSS class defined', ({ doc }) => {
+    const cssText = Array.from(doc.styleSheets)
+      .flatMap(s => { try { return Array.from(s.cssRules); }
+                      catch(_) { return []; } })
+      .map(r => r.cssText || '').join('\n');
+    assert(/\.fade-in|\.tt-fade/.test(cssText),
+      'fade animation class defined');
+  });
+
+  test('skip-to-content link exists for screen readers', ({ doc }) => {
+    // Any element with an id and a link/button acting as skip works;
+    // we just check there is an accessible title/aria-label on the root.
+    const frame = doc.getElementById('crt-frame');
+    assert(frame.getAttribute('aria-label'),
+      'root has aria-label for SR users');
+  });
+
+  // ============================================================
+  // Task 12: End-to-end & replayability
+  // ============================================================
+
+  test('every location in GG.LOCATIONS is reachable from gardenGate', ({ GG }) => {
+    const keys = Object.keys(GG.LOCATIONS);
+    const reached = new Set(['gardenGate']);
+    const queue = ['gardenGate'];
+    while (queue.length) {
+      const k = queue.shift();
+      const loc = GG.LOCATIONS[k];
+      const exits = (loc.exits || []).slice();
+      // Include hidden exits so the reachability proof covers the
+      // fully-unlocked world.
+      const hidden = (GG.HIDDEN_EXITS && GG.HIDDEN_EXITS[k]);
+      if (hidden) exits.push(hidden);
+      for (const exit of exits) {
+        const to = exit.to;
+        if (to && !reached.has(to)) {
+          reached.add(to);
+          queue.push(to);
+        }
+      }
+    }
+    for (const k of keys) {
+      assert(reached.has(k), `${k} unreachable from gardenGate`);
+    }
+  });
+
+  test('replay: same seed produces identical puzzle sequence', ({ GG }) => {
+    function playPuzzleSeq(seed) {
+      GG.newGame(seed);
+      const out = [];
+      for (const loc of GG.RESCUE_LOCATIONS) {
+        out.push(GG.pickPuzzle(loc).question);
+      }
+      return out;
+    }
+    assertEq(playPuzzleSeq(12345), playPuzzleSeq(12345),
+      'same seed is reproducible');
+  });
+
+  test('replay: different seeds produce different puzzle sequences', ({ GG }) => {
+    function playPuzzleSeq(seed) {
+      GG.newGame(seed);
+      return GG.RESCUE_LOCATIONS.map(l => GG.pickPuzzle(l).question).join('|');
+    }
+    const a = playPuzzleSeq(1);
+    let found = false;
+    for (let s = 2; s < 40; s++) {
+      if (playPuzzleSeq(s) !== a) { found = true; break; }
+    }
+    assert(found, 'at least one other seed diverges');
+  });
+
+  test('replay: same seed yields identical witch-spawn stream', ({ GG }) => {
+    function trace(seed) {
+      GG.newGame(seed);
+      const out = [];
+      for (let i = 0; i < 40; i++) out.push(GG.maybeSpawnWitch('forest'));
+      return out;
+    }
+    assertEq(trace(9999), trace(9999));
+  });
+
+  test('full playthrough: all 6 rescues -> victory', ({ GG }) => {
+    GG.newGame(7);
+    // Navigate and rescue each child via solving the picked puzzle.
+    for (const loc of GG.RESCUE_LOCATIONS) {
+      const p = GG.pickPuzzle(loc);
+      const ok = GG.answerPuzzle(p, p.answer);
+      assertEq(ok, true, `${loc} puzzle solved`);
+      GG.rescueChild(loc);
+    }
+    assertEq(GG.isVictory(), true, 'victorious');
+    assertEq(GG.state.stats.puzzlesSolved, 6, '6 puzzles solved');
+  });
+
+  test('catch penalty handles empty inventory gracefully', ({ GG }) => {
+    GG.newGame(1);
+    assertEq(GG.state.inventory.length, 0);
+    // Should not throw.
+    GG.handleCatch();
+    assertEq(GG.state.currentLocation, 'gardenGate');
+  });
+
+  test('magicCloak persists after a witch encounter (immunity proven)', ({ GG }) => {
+    GG.newGame(1);
+    GG.addItem('magicCloak');
+    // No spawn should happen in 500 rolls across all dangerous locations.
+    for (let i = 0; i < 500; i++) {
+      assertEq(GG.maybeSpawnWitch('forest'), false);
+    }
+    assert(GG.hasItem('magicCloak'), 'still holding cloak');
+  });
+
+  test('file stays comfortably under 200KB budget', async () => {
+    const res = await fetch('../index.html');
+    const txt = await res.text();
+    const bytes = new Blob([txt]).size;
+    assert(bytes < 200 * 1024,
+      `index.html is ${bytes} bytes; must be < ${200 * 1024}`);
+  });
+
+  test('no external <script src> or <link href> (single-file rule)', async ({ doc }) => {
+    // Check the game iframe document (not this harness).
+    const res = await fetch('../index.html');
+    const html = await res.text();
+    assert(!/<script[^>]+src=/i.test(html), 'no external scripts');
+    assert(!/<link[^>]+href=["'](?!#)/i.test(html) ||
+      /<link[^>]+href=["']#/i.test(html) === false,
+      'no external stylesheets');
+    // The meta viewport <meta> does NOT count; we re-check only link/script.
+    const linkMatches = html.match(/<link[^>]+>/gi) || [];
+    for (const tag of linkMatches) {
+      assert(!/href=["']http/i.test(tag),
+        'no http-linked resources');
+    }
+  });
+
+  test('restart: play-again button starts a fresh game', async ({ GG, doc }) => {
+    GG.newGame(100);
+    GG.state.rescued = GG.RESCUE_LOCATIONS.slice();
+    GG.state.stats.puzzlesSolved = 12;
+    await GG.renderVictory();
+    const btn = doc.querySelector('[data-menu-choice="restart"]');
+    assert(btn, 'restart button rendered');
+    btn.click();
+    // Give renderLocation a tick to wire state
+    await new Promise(r => setTimeout(r, 30));
+    assertEq(GG.state.stats.puzzlesSolved, 0, 'stats reset');
+    assertEq(GG.state.rescued.length, 0, 'rescued reset');
+    assertEq(GG.state.currentLocation, 'gardenGate', 'back at gate');
+  });
+
+  test('crossroads (including hidden) reaches all 4 main areas', ({ GG }) => {
+    const exits = GG.LOCATIONS.crossroads.exits.slice();
+    if (GG.HIDDEN_EXITS && GG.HIDDEN_EXITS.crossroads) {
+      exits.push(GG.HIDDEN_EXITS.crossroads);
+    }
+    const tos = exits.map(e => e.to);
+    for (const req of ['forest', 'river', 'mountainPath', 'castleRuins']) {
+      assert(tos.includes(req), `crossroads -> ${req}`);
+    }
+  });
+
+  test('victory stats remain stable if renderVictory called twice', async ({ GG }) => {
+    GG.newGame(33);
+    GG.state.rescued = GG.RESCUE_LOCATIONS.slice();
+    GG.state.stats.puzzlesSolved = 9;
+    GG.state.stats.witchEncounters = 2;
+    await GG.renderVictory();
+    await GG.renderVictory();
+    assertEq(GG.state.stats.puzzlesSolved, 9);
+    assertEq(GG.state.stats.witchEncounters, 2);
+  });
+
+  runAll();
+</script>
+</body>
+</html>

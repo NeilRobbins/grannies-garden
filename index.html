@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Granny's Garden</title>
+<style>
+  /* ================================================================
+   * Granny's Garden — BBC Micro teletext-style browser game.
+   * Everything is self-contained in this single file.
+   * ================================================================ */
+
+  :root {
+    /* Teletext palette (all 8 colours). These are referenced from JS too. */
+    --tt-black:   #000000;
+    --tt-red:     #FF0000;
+    --tt-green:   #00FF00;
+    --tt-yellow:  #FFFF00;
+    --tt-blue:    #0000FF;
+    --tt-magenta: #FF00FF;
+    --tt-cyan:    #00FFFF;
+    --tt-white:   #FFFFFF;
+
+    /* Character grid sizing — 40 columns × 25 rows is BBC Mode 7. */
+    --cols: 40;
+    --rows: 25;
+    /* Chunky cell size. Scaled responsively via JS/CSS below. */
+    --cell-w: 16px;
+    --cell-h: 28px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #111;                                /* CRT surround */
+    font-family: "Courier New", "Lucida Console", monospace;
+    overflow: hidden;
+  }
+
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+  }
+
+  /* ---------- CRT surround + curvature ---------- */
+  #crt-frame {
+    position: relative;
+    padding: 24px;
+    border-radius: 24px;
+    background: radial-gradient(ellipse at centre, #222 0%, #0a0a0a 70%, #000 100%);
+    box-shadow:
+      inset 0 0 40px rgba(0,0,0,0.9),
+      0 0 30px rgba(0,0,0,0.8);
+  }
+
+  /* ---------- The display panel (40x25 character grid) ---------- */
+  #display-panel {
+    position: relative;
+    width:  calc(var(--cols) * var(--cell-w));
+    height: calc(var(--rows) * var(--cell-h));
+    background: var(--tt-black);
+    color: var(--tt-white);
+    font-family: "Courier New", "Lucida Console", monospace;
+    font-weight: 700;
+    font-size: 22px;
+    line-height: var(--cell-h);
+    /* Phosphor glow — subtle, CRT-like. */
+    text-shadow: 0 0 4px currentColor, 0 0 8px currentColor;
+    border-radius: 6px;
+    overflow: hidden;
+    /* Slight curvature — JS toggles .crt-off on body to disable. */
+    transform: perspective(800px) rotateX(0.6deg);
+    transition: transform 0.2s ease;
+  }
+
+  body.crt-off #display-panel {
+    transform: none;
+  }
+
+  /* ---------- Scanline overlay ---------- */
+  #scanlines {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0)   0px,
+      rgba(0,0,0,0)   2px,
+      rgba(0,0,0,0.25) 3px,
+      rgba(0,0,0,0.25) 3px
+    );
+    mix-blend-mode: multiply;
+    opacity: 1;
+    transition: opacity 0.15s ease;
+    z-index: 10;
+  }
+  body.crt-off #scanlines,
+  html body.crt-off #scanlines {
+    display: none !important;
+    opacity: 0 !important;
+  }
+
+  /* ---------- Internal layout of the panel ---------- */
+  #art-area, #text-area, #menu-area, #status-area {
+    position: relative;
+    padding: 4px 12px;
+  }
+  #art-area  { min-height: calc(12 * var(--cell-h)); color: var(--tt-green); }
+  #text-area { min-height: calc(5  * var(--cell-h)); color: var(--tt-white); }
+  #menu-area { min-height: calc(4  * var(--cell-h)); color: var(--tt-yellow); }
+  #status-area {
+    min-height: calc(2  * var(--cell-h));
+    color: var(--tt-cyan);
+    border-top: 1px dashed rgba(255,255,255,0.15);
+  }
+
+  /* Divider */
+  .tt-divider {
+    border-top: 1px dashed rgba(255,255,255,0.15);
+    margin: 2px 8px;
+  }
+
+  /* ---------- Teletext art ---------- */
+  .tt-art {
+    margin: 0;
+    padding: 0;
+    font-family: inherit;
+    font-size: 16px;
+    line-height: 1.05;
+    white-space: pre;
+    font-weight: 700;
+    text-shadow: inherit;
+    letter-spacing: 0;
+  }
+  @media (max-width: 720px) {
+    .tt-art { font-size: 12px; }
+  }
+  @media (max-width: 480px) {
+    .tt-art { font-size: 9px; }
+  }
+
+  /* ---------- Grid (createGrid) helper element ---------- */
+  .tt-grid {
+    display: inline-grid;
+    grid-template-columns: repeat(var(--g-cols, 40), var(--cell-w));
+    grid-auto-rows: var(--cell-h);
+    font-family: inherit;
+    line-height: var(--cell-h);
+  }
+  .tt-grid .tt-cell {
+    width: var(--cell-w);
+    height: var(--cell-h);
+    text-align: center;
+    white-space: pre;
+  }
+
+  /* ---------- Menu choices ---------- */
+  .tt-choice {
+    background: transparent;
+    color: var(--tt-yellow);
+    border: none;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    text-align: left;
+    padding: 2px 4px;
+    cursor: pointer;
+    text-shadow: inherit;
+    display: inline-block;
+    min-height: 32px;       /* mobile touch target */
+    min-width: 44px;
+  }
+  .tt-choice:hover,
+  .tt-choice:focus {
+    color: var(--tt-white);
+    background: rgba(255,255,0,0.1);
+    outline: none;
+  }
+
+  /* ---------- Controls (CRT toggle, mute) ---------- */
+  .tt-controls {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    display: flex;
+    gap: 6px;
+    z-index: 20;
+  }
+  .tt-controls button {
+    background: #111;
+    color: var(--tt-cyan);
+    border: 1px solid var(--tt-cyan);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 2px 8px;
+    cursor: pointer;
+    opacity: 0.6;
+  }
+  .tt-controls button:hover,
+  .tt-controls button:focus { opacity: 1; outline: none; }
+
+  /* ---------- Responsive scaling ---------- */
+  @media (max-width: 720px) {
+    :root { --cell-w: 11px; --cell-h: 20px; }
+    #display-panel { font-size: 16px; }
+  }
+  @media (max-width: 480px) {
+    :root { --cell-w: 8px; --cell-h: 15px; }
+    #display-panel { font-size: 12px; }
+    #crt-frame { padding: 12px; border-radius: 16px; }
+  }
+
+  /* ---------- Gentle fade for panel transitions ---------- */
+  @keyframes tt-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .tt-fade {
+    animation: tt-fade-in 320ms ease-out;
+  }
+  .fade-in {
+    animation: tt-fade-in 320ms ease-out;
+  }
+
+  /* ---------- Accessible focus ring ---------- */
+  #menu-area button:focus,
+  #menu-area button:focus-visible {
+    outline: 2px solid var(--tt-yellow);
+    outline-offset: 2px;
+  }
+
+  /* ---------- Reduced-motion preference ---------- */
+  @media (prefers-reduced-motion: reduce) {
+    .tt-fade, .fade-in { animation: none !important; }
+    #scanlines { display: none !important; }
+    #display-panel { transition: none !important; }
+    *, *::before, *::after {
+      animation-duration: 0s !important;
+      transition-duration: 0s !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div id="crt-frame" role="application" aria-label="Granny's Garden game">
+  <div class="tt-controls">
+    <button id="crt-toggle" aria-label="Toggle CRT effect" title="Toggle CRT effect">CRT</button>
+    <button id="mute-toggle" aria-label="Toggle sound" title="Toggle sound">♪</button>
+  </div>
+
+  <div id="display-panel" aria-live="polite">
+    <div id="art-area"    aria-label="scene"></div>
+    <div class="tt-divider"></div>
+    <div id="text-area"   aria-label="narration"></div>
+    <div class="tt-divider"></div>
+    <div id="menu-area"   aria-label="choices" role="menu"></div>
+    <div id="status-area" aria-label="status"></div>
+    <div id="scanlines" aria-hidden="true"></div>
+  </div>
+</div>
+
+<script>
+/* ================================================================
+ * GG — Granny's Garden game namespace.
+ * Everything is exposed on window.GG so tests can drive it.
+ * ================================================================ */
+(function () {
+  'use strict';
+
+  const GG = window.GG = window.GG || {};
+
+  // --- Teletext palette -------------------------------------------------
+  GG.TELETEXT_COLORS = Object.freeze({
+    black:   '#000000',
+    red:     '#FF0000',
+    green:   '#00FF00',
+    yellow:  '#FFFF00',
+    blue:    '#0000FF',
+    magenta: '#FF00FF',
+    cyan:    '#00FFFF',
+    white:   '#FFFFFF',
+  });
+
+  // --- Grid helpers -----------------------------------------------------
+  /**
+   * Create a character grid element of given dimensions.
+   * Each cell is a span; cells can be individually coloured.
+   */
+  GG.createGrid = function (cols, rows) {
+    const g = document.createElement('div');
+    g.className = 'tt-grid';
+    g.dataset.cols = String(cols);
+    g.dataset.rows = String(rows);
+    g.style.setProperty('--g-cols', cols);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cell = document.createElement('span');
+        cell.className = 'tt-cell';
+        cell.dataset.r = r;
+        cell.dataset.c = c;
+        cell.textContent = ' ';
+        g.appendChild(cell);
+      }
+    }
+    return g;
+  };
+
+  GG.getCell = function (grid, row, col) {
+    const cols = Number(grid.dataset.cols);
+    return grid.children[row * cols + col] || null;
+  };
+
+  GG.setCell = function (grid, row, col, ch, colour) {
+    const cell = GG.getCell(grid, row, col);
+    if (!cell) return;
+    if (ch != null)     cell.textContent = ch;
+    if (colour != null) cell.style.color = GG.TELETEXT_COLORS[colour] || colour;
+  };
+
+  GG.setCellColor = function (grid, row, col, colour) {
+    GG.setCell(grid, row, col, null, colour);
+  };
+
+  /**
+   * Draw a string of text at (row, col) in the given colour.
+   * Characters wrap onto further cells on the same row.
+   */
+  GG.drawText = function (grid, row, col, text, colour) {
+    for (let i = 0; i < text.length; i++) {
+      GG.setCell(grid, row, col + i, text[i], colour);
+    }
+  };
+
+  // --- CRT effect toggle ------------------------------------------------
+  GG.toggleCRT = function () {
+    document.body.classList.toggle('crt-off');
+  };
+
+  // --- Motion preference helpers ---------------------------------------
+  GG.prefersReducedMotion = function () {
+    try {
+      return !!(window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (_) { return false; }
+  };
+
+  GG.typewriterSpeedForMotion = function (reduced) {
+    const isReduced = reduced == null ? GG.prefersReducedMotion() : !!reduced;
+    if (isReduced) return 0;                 // instant reveal
+    return GG.DEFAULT_TYPEWRITER_SPEED;
+  };
+
+  // --- Audio system (Web Audio API) ------------------------------------
+  GG.Audio = {
+    ctx: null,
+    muted: false,
+    _master: null,
+
+    init: function () {
+      if (this.ctx) return this.ctx;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (typeof AC !== 'function') return null;
+      try {
+        this.ctx = new AC();
+        this._master = this.ctx.createGain();
+        this._master.gain.value = this.muted ? 0 : 0.15;
+        this._master.connect(this.ctx.destination);
+      } catch (_) {
+        this.ctx = null;
+      }
+      return this.ctx;
+    },
+
+    setMuted: function (flag) {
+      this.muted = !!flag;
+      if (this._master) this._master.gain.value = this.muted ? 0 : 0.15;
+      const btn = document.getElementById('mute-toggle');
+      if (btn) btn.textContent = this.muted ? '\u266A\u0338' : '\u266A';
+    },
+
+    // --- Primitives ---
+    _tone: function (freq, durMs, type, vol) {
+      if (!this.ctx || this.muted) return;
+      try {
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        osc.type = type || 'square';
+        osc.frequency.value = freq;
+        const dur = durMs / 1000;
+        const v = vol == null ? 0.5 : vol;
+        g.gain.setValueAtTime(0, now);
+        g.gain.linearRampToValueAtTime(v, now + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+        osc.connect(g).connect(this._master);
+        osc.start(now);
+        osc.stop(now + dur + 0.02);
+      } catch (_) { /* ignore */ }
+    },
+
+    _noise: function (durMs, vol) {
+      if (!this.ctx || this.muted) return;
+      try {
+        const frames = Math.max(1, Math.floor(this.ctx.sampleRate * durMs / 1000));
+        const buf = this.ctx.createBuffer(1, frames, this.ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < frames; i++) data[i] = (Math.random() * 2 - 1);
+        const src = this.ctx.createBufferSource();
+        src.buffer = buf;
+        const g = this.ctx.createGain();
+        g.gain.value = vol == null ? 0.3 : vol;
+        src.connect(g).connect(this._master);
+        src.start();
+      } catch (_) { /* ignore */ }
+    },
+
+    // --- Voice effects ---
+    blip: function () {
+      // Short, quiet chirp used by the typewriter.
+      this._tone(520 + (Math.random() * 120 | 0), 18, 'square', 0.2);
+    },
+
+    menu: function () {
+      this._tone(880, 60, 'triangle', 0.4);
+    },
+
+    success: function () {
+      // Rising major arpeggio.
+      const t = (this.ctx && this.ctx.currentTime) || 0;
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      notes.forEach((f, i) => {
+        setTimeout(() => this._tone(f, 120, 'triangle', 0.4), i * 90);
+      });
+    },
+
+    fail: function () {
+      // Falling minor second.
+      this._tone(220, 180, 'sawtooth', 0.4);
+      setTimeout(() => this._tone(174.6, 260, 'sawtooth', 0.4), 150);
+    },
+
+    witch: function () {
+      // Shriek: dissonant pair + noise gust.
+      this._tone(1200, 280, 'square', 0.35);
+      this._tone(980, 320, 'sawtooth', 0.25);
+      this._noise(420, 0.18);
+    },
+
+    victory: function () {
+      // Little fanfare.
+      const pattern = [
+        [523.25, 140], [659.25, 140], [783.99, 140],
+        [1046.5, 220], [783.99, 120], [1046.5, 320],
+      ];
+      let t = 0;
+      for (const [f, d] of pattern) {
+        const dd = d;
+        setTimeout(() => this._tone(f, dd, 'triangle', 0.45), t);
+        t += d * 0.9;
+      }
+    },
+  };
+
+  // Typewriter per-char callback routes to Audio.blip (so tests can
+  // still stub GG.blip directly, and the audio layer stays swappable).
+  GG.blip = function () {
+    if (GG.Audio && typeof GG.Audio.blip === 'function') GG.Audio.blip();
+  };
+
+  // --- Typewriter text animation ---------------------------------------
+  GG.DEFAULT_TYPEWRITER_SPEED = 28;   // ms per character (feels BBC-ish)
+  let activeTypewriter = null;        // the current in-flight animation
+
+  /**
+   * Render `text` into `target` character-by-character.
+   * Returns a Promise that resolves when the full text is rendered or skipped.
+   * Options: { speed, onChar, clear }
+   */
+  GG.typewriter = function (target, text, opts) {
+    // Back-compat: a number in place of opts is a speed value.
+    if (typeof opts === 'number') opts = { speed: opts };
+    opts = opts || {};
+    const speed  = opts.speed  != null ? opts.speed  : GG.DEFAULT_TYPEWRITER_SPEED;
+    // If no explicit per-char hook is supplied, default to GG.blip so the
+    // audio layer (and tests) automatically hear the typewriter.
+    const onChar = opts.onChar !== undefined
+                     ? opts.onChar
+                     : (typeof GG.blip === 'function' ? GG.blip : null);
+    const clear  = opts.clear !== false;   // default true
+
+    // Cancel any previous animation cleanly.
+    if (activeTypewriter) activeTypewriter.skip();
+
+    if (clear) target.textContent = '';
+    const startIdx = target.textContent.length;
+
+    return new Promise(resolve => {
+      let i = 0;
+      let timer = null;
+      let cancelled = false;
+
+      const state = {
+        skip() {
+          if (cancelled) return;
+          cancelled = true;
+          if (timer) clearTimeout(timer);
+          target.textContent = (clear ? '' : target.textContent.slice(0, startIdx)) + text;
+          if (activeTypewriter === state) activeTypewriter = null;
+          resolve();
+        },
+      };
+      activeTypewriter = state;
+
+      function step() {
+        if (cancelled) return;
+        if (i >= text.length) {
+          if (activeTypewriter === state) activeTypewriter = null;
+          resolve();
+          return;
+        }
+        target.textContent += text[i];
+        if (onChar) {
+          try { onChar(text[i], i); } catch (e) { /* never break the anim */ }
+        }
+        i++;
+        timer = setTimeout(step, speed);
+      }
+      step();
+    });
+  };
+
+  GG.skipTypewriter = function () {
+    if (activeTypewriter) activeTypewriter.skip();
+  };
+
+  /**
+   * Render a sequence of text blocks one after another (non-clearing).
+   * Useful for multi-paragraph narration without wiping previous text.
+   */
+  GG.queueTypewriter = async function (target, blocks, opts) {
+    opts = opts || {};
+    target.textContent = '';
+    for (let i = 0; i < blocks.length; i++) {
+      const blockOpts = Object.assign({}, opts, { clear: false });
+      await GG.typewriter(target, blocks[i], blockOpts);
+    }
+  };
+
+  // --- Deterministic RNG (Mulberry32) -----------------------------------
+  // A tiny seeded PRNG so replays with the same seed are identical but
+  // different seeds give different experiences.
+  function makeRng(seed) {
+    let s = (seed >>> 0) || 1;
+    return function () {
+      s = (s + 0x6D2B79F5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // --- Puzzle engine ---------------------------------------------------
+  GG.PUZZLE_TYPES = ['riddle', 'word', 'maths', 'logic', 'sequence', 'memory'];
+
+  // Each rescuable location has 2-3 puzzles to rotate between.
+  GG.PUZZLES = {
+    forest: [
+      { type: 'riddle',
+        question: "A lost child hides behind a tree. They whisper: " +
+                  "\"I have hands but cannot clap. What am I?\"",
+        choices: ['a clock', 'a tree', 'a shadow', 'a glove'],
+        answer: 'a clock' },
+      { type: 'word',
+        question: "The child offers a scrambled word: ORFEST. " +
+                  "Unscramble it:",
+        answer: 'forest' },
+      { type: 'sequence',
+        question: "Count the owls: 2, 4, 6, 8, ?",
+        choices: ['9', '10', '11', '12'],
+        answer: '10' },
+    ],
+    river: [
+      { type: 'maths',
+        question: "Three stepping stones, then two more, then one " +
+                  "more. How many stones in total?",
+        answer: 6 },
+      { type: 'logic',
+        question: "Three stones glow. The safe one is NOT red, and " +
+                  "NOT the biggest. Which is safe?",
+        choices: ['red small', 'blue large', 'blue small', 'green large'],
+        answer: 'blue small' },
+      { type: 'riddle',
+        question: "The river whispers: \"The more you take, the more " +
+                  "you leave behind. What am I?\"",
+        choices: ['water', 'footsteps', 'sand', 'leaves'],
+        answer: 'footsteps' },
+    ],
+    mountainPath: [
+      { type: 'maths',
+        question: "There are 10 steps to the summit. You climb 4, " +
+                  "then slip back 1. How many steps left to the top?",
+        answer: 7 },
+      { type: 'sequence',
+        question: "Eagles circle above: 1, 1, 2, 3, 5, ?",
+        choices: ['6', '7', '8', '9'],
+        answer: '8' },
+      { type: 'word',
+        question: "The climbing child calls a word: UMTOAIN. Unscramble:",
+        answer: 'mountain' },
+    ],
+    cottage: [
+      { type: 'riddle',
+        question: "The trapped child asks: \"What has a neck but no " +
+                  "head, and wears a cap?\"",
+        choices: ['a bottle', 'a scarf', 'a witch', 'a bird'],
+        answer: 'a bottle' },
+      { type: 'logic',
+        question: "Three doors. Safe is NOT red and NOT left. Which?",
+        choices: ['red left', 'green middle', 'red right', 'blue left'],
+        answer: 'green middle' },
+      { type: 'memory',
+        question: "The witch drops: BROOM, CAT, POT. What did she drop first?",
+        answer: 'broom' },
+    ],
+    crystalCave: [
+      { type: 'maths',
+        question: "Five crystals shine, then three more light up. Total?",
+        answer: 8 },
+      { type: 'riddle',
+        question: "A crystal voice sings: \"I shine without fire, " +
+                  "I fall without breaking. What am I?\"",
+        choices: ['a star', 'a wish', 'a mirror', 'a tear'],
+        answer: 'a star' },
+      { type: 'sequence',
+        question: "Crystals flash: 5, 10, 15, 20, ?",
+        choices: ['21', '24', '25', '30'],
+        answer: '25' },
+    ],
+    castleRuins: [
+      { type: 'logic',
+        question: "Three keys on the wall. The right one is NOT gold " +
+                  "and NOT the smallest. Which?",
+        choices: ['gold large', 'silver small', 'silver large', 'iron tiny'],
+        answer: 'silver large' },
+      { type: 'word',
+        question: "The last child gasps: ELATSC. Unscramble:",
+        answer: 'castle' },
+      { type: 'riddle',
+        question: "The castle asks: \"What is so fragile even saying " +
+                  "its name breaks it?\"",
+        choices: ['a mirror', 'silence', 'a promise', 'ice'],
+        answer: 'silence' },
+    ],
+  };
+
+  /**
+   * Pick a puzzle for a rescuable location using the seeded RNG.
+   * The same seed + same location = same puzzle every time.
+   */
+  GG.pickPuzzle = function (locKey) {
+    const pool = GG.PUZZLES[locKey];
+    if (!pool || pool.length === 0) return null;
+    const rnd = GG.state.rng || Math.random;
+    const idx = Math.floor(rnd() * pool.length);
+    return pool[idx];
+  };
+
+  /**
+   * Render a puzzle: question in text area, choices (if any) as menu.
+   * Free-text puzzles get a plain input line typed in via the keyboard.
+   */
+  GG.renderPuzzle = async function (puzzle) {
+    const textArea = document.getElementById('text-area');
+    const menu = document.getElementById('menu-area');
+    menu.innerHTML = '';
+    await GG.typewriter(textArea, puzzle.question, { onChar: GG.blip });
+
+    if (puzzle.choices && puzzle.choices.length > 0) {
+      puzzle.choices.forEach((choice, idx) => {
+        const n = idx + 1;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tt-choice';
+        btn.dataset.puzzleChoice = String(choice);
+        btn.dataset.choiceNum = String(n);
+        btn.setAttribute('role', 'menuitem');
+        btn.setAttribute('aria-label',
+          `Choice ${n}: ${choice}. Press ${n} or click to select.`);
+        btn.textContent = n + '. ' + choice;
+        menu.appendChild(btn);
+        menu.appendChild(document.createElement('br'));
+      });
+    } else {
+      // Free-text answer field.
+      const form = document.createElement('form');
+      form.className = 'tt-answer-form';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'tt-answer-input';
+      input.setAttribute('aria-label', 'Type your answer and press Enter');
+      input.autocomplete = 'off';
+      const submit = document.createElement('button');
+      submit.type = 'submit';
+      submit.className = 'tt-choice';
+      submit.textContent = '> answer';
+      form.appendChild(input);
+      form.appendChild(submit);
+      menu.appendChild(form);
+      setTimeout(() => input.focus(), 50);
+    }
+  };
+
+  /**
+   * Normalise then compare a player answer with the puzzle's expected answer.
+   * Updates stats on success.
+   */
+  GG.answerPuzzle = function (puzzle, player) {
+    const norm = v => String(v == null ? '' : v).trim().toLowerCase();
+    const ok = norm(player) === norm(puzzle.answer);
+    if (ok && GG.state && GG.state.stats) {
+      GG.state.stats.puzzlesSolved += 1;
+    }
+    return ok;
+  };
+
+  /**
+   * Mark the child at `locKey` as rescued (idempotent).
+   */
+  GG.rescueChild = function (locKey) {
+    if (!GG.state.rescued.includes(locKey)) {
+      GG.state.rescued.push(locKey);
+    }
+  };
+
+  // --- Progress, victory & stats ---------------------------------------
+  GG.RESCUE_LOCATIONS = [
+    'forest', 'river', 'mountainPath',
+    'cottage', 'crystalCave', 'castleRuins',
+  ];
+
+  GG.isVictory = function () {
+    if (!GG.state || !Array.isArray(GG.state.rescued)) return false;
+    return GG.RESCUE_LOCATIONS.every(k => GG.state.rescued.includes(k));
+  };
+
+  GG.elapsedMs = function () {
+    if (!GG.state || !GG.state.startedAt) return 0;
+    return Date.now() - GG.state.startedAt;
+  };
+
+  GG.formatElapsed = function (ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    const pad = n => (n < 10 ? '0' + n : '' + n);
+    return pad(m) + ':' + pad(s);
+  };
+
+  GG.renderVictory = async function () {
+    if (!GG.state) return;
+    GG.state.gameOver = true;
+    if (GG.Audio && GG.Audio.victory) GG.Audio.victory();
+
+    const art = document.getElementById('art-area');
+    const text = document.getElementById('text-area');
+    const menu = document.getElementById('menu-area');
+    const status = document.getElementById('status-area');
+
+    if (art) {
+      art.innerHTML = '';
+      const lines = [
+        '    *  \u2605  *  \u2605  *  \u2605  *',
+        '   \u2605  HOORAY! GRANNY SMILES  \u2605',
+        '    *  \u2605  *  \u2605  *  \u2605  *',
+      ];
+      for (const l of lines) {
+        const row = document.createElement('div');
+        row.textContent = l;
+        row.style.color = 'var(--tt-yellow)';
+        art.appendChild(row);
+      }
+    }
+
+    if (text) {
+      text.textContent = '';
+      await GG.typewriter(text,
+        'VICTORY! All six children are safely home. Granny hugs you tight. ' +
+        'The Kingdom of the Mountains is saved!');
+    }
+
+    const elapsed = GG.formatElapsed(GG.elapsedMs());
+    const s = GG.state.stats || {};
+    if (status) {
+      status.textContent =
+        'Time ' + elapsed +
+        '  Puzzles ' + (s.puzzlesSolved || 0) +
+        '  Witch ' + (s.witchEncounters || 0) +
+        '  Items ' + (s.itemsFound || 0) +
+        '  Seed ' + GG.state.seed;
+    }
+
+    if (menu) {
+      menu.innerHTML = '';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = '1. Play again';
+      btn.setAttribute('data-menu-choice', 'restart');
+      btn.setAttribute('aria-label', 'Play again');
+      btn.addEventListener('click', () => {
+        GG.newGame();
+        GG.renderLocation('gardenGate');
+      });
+      menu.appendChild(btn);
+    }
+  };
+
+  // --- Wicked Witch system ---------------------------------------------
+  GG.WITCH = {
+    encounterRate: 0.20,                // 20% chance per dangerous location
+    safeLocations: ['gardenGate'],      // where the witch cannot reach
+    // Cottage uses a chase sequence rather than a regular encounter.
+    chaseLocation: 'cottage',
+  };
+
+  /**
+   * Roll against the seeded RNG to decide whether the witch spawns here.
+   * Always false at safe locations or when the Magic Cloak is carried.
+   */
+  GG.maybeSpawnWitch = function (locKey) {
+    if (!GG.state) return false;
+    if (GG.WITCH.safeLocations.includes(locKey)) return false;
+    if (GG.state.inventory && GG.state.inventory.includes('magicCloak')) {
+      return false;
+    }
+    const rnd = GG.state.rng || Math.random;
+    return rnd() < GG.WITCH.encounterRate;
+  };
+
+  /**
+   * Draw a warning screen announcing the witch. Keeps the art area clear
+   * (a future art pass can paint a witch silhouette here).
+   */
+  GG.renderWitchWarning = async function () {
+    const doc = document;
+    const text = doc.getElementById('text-area');
+    if (text) {
+      text.textContent = '';
+      await GG.typewriter(text,
+        "A shriek splits the air! The Wicked Witch cackles overhead, " +
+        "her cloak like a storm-cloud. She has seen you!",
+        GG.DEFAULT_TYPEWRITER_SPEED);
+    }
+    const menu = doc.getElementById('menu-area');
+    if (menu) {
+      menu.innerHTML = '';
+    }
+  };
+
+  /**
+   * Run a witch encounter. In production the player picks escape/hide/fight;
+   * tests pass { auto: 'escape' | 'caught' } to bypass interaction.
+   * Returns { caught: boolean }.
+   */
+  GG.witchEncounter = async function (opts) {
+    opts = opts || {};
+    if (GG.state && GG.state.stats) {
+      GG.state.stats.witchEncounters += 1;
+    }
+    await GG.renderWitchWarning();
+    if (opts.auto === 'escape') return { caught: false };
+    if (opts.auto === 'caught') {
+      GG.handleCatch();
+      return { caught: true };
+    }
+    // Default (no UI wired yet): 50/50 based on RNG.
+    const rnd = (GG.state && GG.state.rng) || Math.random;
+    if (rnd() < 0.5) return { caught: false };
+    GG.handleCatch();
+    return { caught: true };
+  };
+
+  /**
+   * Apply the catch penalty: teleport back to the garden gate and lose
+   * the most recently-picked-up item.
+   */
+  GG.handleCatch = function () {
+    if (!GG.state) return;
+    GG.state.currentLocation = 'gardenGate';
+    if (GG.state.inventory && GG.state.inventory.length > 0) {
+      GG.state.inventory.pop();
+    }
+  };
+
+  /**
+   * Build a chase sequence through the witch's cottage. Returns an
+   * immutable-ish state object; use GG.chaseStep to advance.
+   * Each room has { name, exits:[dir], correct:dir }; the final room's
+   * `correct` exit leads to escape.
+   */
+  GG.startChase = function () {
+    const rnd = (GG.state && GG.state.rng) || Math.random;
+    const dirs = ['north', 'south', 'east', 'west'];
+    const rooms = [];
+    const roomCount = 4;
+    for (let i = 0; i < roomCount; i++) {
+      // Shuffle exits deterministically per seed.
+      const exits = dirs.slice();
+      for (let j = exits.length - 1; j > 0; j--) {
+        const k = Math.floor(rnd() * (j + 1));
+        [exits[j], exits[k]] = [exits[k], exits[j]];
+      }
+      const correct = exits[Math.floor(rnd() * exits.length)];
+      rooms.push({
+        name: ['Kitchen', 'Pantry', 'Parlour', 'Hallway'][i] || ('Room ' + i),
+        exits: exits,
+        correct: correct,
+      });
+    }
+    return {
+      rooms: rooms,
+      currentRoom: 0,
+      escaped: false,
+      caught: false,
+      wrongMoves: 0,
+    };
+  };
+
+  /**
+   * Step through the chase. `direction` must match one of the current
+   * room's exits. Correct exits advance; wrong exits increase the
+   * wrongMoves counter; 3 wrong moves means caught.
+   */
+  GG.chaseStep = function (state, direction) {
+    if (state.escaped || state.caught) return state;
+    const room = state.rooms[state.currentRoom];
+    if (direction === room.correct) {
+      const next = state.currentRoom + 1;
+      if (next >= state.rooms.length) {
+        return Object.assign({}, state, { escaped: true });
+      }
+      return Object.assign({}, state, { currentRoom: next });
+    }
+    const wrong = state.wrongMoves + 1;
+    if (wrong >= 3) {
+      return Object.assign({}, state, { wrongMoves: wrong, caught: true });
+    }
+    return Object.assign({}, state, { wrongMoves: wrong });
+  };
+
+  // --- Inventory system -------------------------------------------------
+  GG.INVENTORY_LIMIT = 5;
+
+  GG.ITEMS = {
+    key: {
+      name: 'Brass Key',
+      description: 'A heavy brass key, warm to the touch.',
+      icon: '\u26B7',       // key-like glyph
+      foundAt: 'forest',
+    },
+    lamp: {
+      name: 'Oil Lamp',
+      description: 'A little lamp whose flame never seems to waver.',
+      icon: '\u2600',       // sun/star glyph
+      foundAt: 'crystalCave',
+    },
+    bread: {
+      name: 'Granny\u2019s Bread',
+      description: 'Fresh from the oven. Its smell calms nervous hearts.',
+      icon: '\u25A0',
+      foundAt: 'gardenGate',
+    },
+    flower: {
+      name: 'Moon Flower',
+      description: 'A silver bloom that opens only at night.',
+      icon: '\u273F',       // flower glyph
+      foundAt: 'meadow',
+    },
+    magicCloak: {
+      name: 'Magic Cloak',
+      description: 'Woven from dusk itself \u2014 the Witch cannot see you.',
+      icon: '\u25BC',
+      foundAt: 'castleRuins',
+    },
+    coin: {
+      name: 'Silver Coin',
+      description: 'Stamped with the King of the Mountains\u2019 crest.',
+      icon: '\u25CF',
+      foundAt: 'river',
+    },
+  };
+
+  GG.hasItem = function (id) {
+    return !!(GG.state && GG.state.inventory && GG.state.inventory.includes(id));
+  };
+
+  GG.addItem = function (id) {
+    if (!GG.state || !GG.ITEMS[id]) return false;
+    const inv = GG.state.inventory;
+    if (inv.includes(id)) return true;                // idempotent
+    if (inv.length >= GG.INVENTORY_LIMIT) return false;
+    inv.push(id);
+    if (GG.state.stats) GG.state.stats.itemsFound += 1;
+    return true;
+  };
+
+  GG.removeItem = function (id) {
+    if (!GG.state) return false;
+    const inv = GG.state.inventory;
+    const idx = inv.indexOf(id);
+    if (idx < 0) return false;
+    inv.splice(idx, 1);
+    return true;
+  };
+
+  GG.renderInventory = function () {
+    const status = document.getElementById('status-area');
+    if (!status || !GG.state) return;
+    const inv = GG.state.inventory || [];
+    if (inv.length === 0) {
+      status.textContent = '(no items)';
+      return;
+    }
+    const parts = inv.map(id => {
+      const it = GG.ITEMS[id];
+      return it ? (it.icon + ' ' + it.name) : id;
+    });
+    status.textContent = parts.join('  ');
+  };
+
+  // --- Narrative text (first-visit / revisit) --------------------------
+  GG.NARRATIVE = {
+    gardenGate: {
+      first:
+        "Granny leans on her garden gate, her apron dusted with flour. " +
+        "\"Oh dear,\" she says softly. \"The King and Queen of the " +
+        "Mountains have lost their six children to the Wicked Witch. " +
+        "Will you help me find them?\" You feel the weight of the quest " +
+        "settle warmly on your shoulders. The gate creaks open.",
+      revisit:
+        "Granny welcomes you back to the gate. \"You are doing " +
+        "bravely, little one,\" she says, pressing your hand. The " +
+        "garden smells of roses and old magic.",
+    },
+    crossroads: {
+      first:
+        "You stand at an old signpost where four paths part ways. " +
+        "A dusty wind whispers between the arrows. Somewhere beyond " +
+        "each path, a lost child waits to be found.",
+      revisit:
+        "The crossroads are quiet once more. You can hear only your " +
+        "own breath, and the creak of the old signpost turning in the " +
+        "wind.",
+    },
+    forest: {
+      first:
+        "Tall pines crowd the path, and the air grows cool and still. " +
+        "You are sure you can hear footsteps, but whenever you look, " +
+        "there is nothing but shadow. Somewhere a child is hiding.",
+      revisit:
+        "You step carefully between the trees. Dry needles crunch " +
+        "underfoot, and a low mist clings to the branches.",
+    },
+    river: {
+      first:
+        "The river sings to itself as it tumbles over mossy stones. " +
+        "On the far bank you glimpse a small figure sitting alone. " +
+        "You must find a way across.",
+      revisit:
+        "The enchanted river chatters merrily over its stones. " +
+        "Sunlight dances on the surface as the current pulls past you.",
+    },
+    mountainPath: {
+      first:
+        "The path winds steeply upward into a cold, thin wind. You " +
+        "can see a child's red cloak fluttering near the summit, " +
+        "but the way is treacherous with loose stones.",
+      revisit:
+        "You shoulder the climb once more. The mountain is vast " +
+        "and silent, and your breath clouds the sharp air.",
+    },
+    cottage: {
+      first:
+        "You creep closer to the witch's cottage. Purple smoke curls " +
+        "from the chimney, and something wicked scuttles behind the " +
+        "window. You hear a little voice crying inside.",
+      revisit:
+        "The cottage crouches in the clearing like a toad. You dare " +
+        "not make a sound. Somewhere within, the witch may still be " +
+        "watching.",
+    },
+    crystalCave: {
+      first:
+        "Darkness presses in from all sides. Without a light you can " +
+        "see nothing at all, though the cave seems to glitter far away " +
+        "in the blackness.",
+      revisit:
+        "Your lantern's glow dances across a thousand crystal faces. " +
+        "The cave hums quietly, almost like a distant song.",
+    },
+    castleRuins: {
+      first:
+        "The castle gate is bound in iron and wound with cruel " +
+        "brambles. A last child is said to be held within. You will " +
+        "need the golden key - and your wits.",
+      revisit:
+        "The ruined walls loom tall. Crows wheel silently against " +
+        "the grey sky above.",
+    },
+    throneRoom: {
+      first:
+        "Trumpets sound as you step into the throne room. The King " +
+        "and Queen rush to embrace their children. Tears and laughter " +
+        "fill the great hall. You have done what no one else could.",
+      revisit:
+        "The throne room still rings with celebration in your " +
+        "honour.",
+    },
+  };
+
+  /**
+   * Return a Granny hint based on current rescue progress.
+   * The three branches correspond to: none rescued, some rescued,
+   * all rescued.
+   */
+  GG.grannyHint = function () {
+    const rescued = (GG.state && GG.state.rescued) || [];
+    if (rescued.length === 0) {
+      return "Granny whispers: \"Begin at the crossroads. Take each " +
+             "path in turn and be kind to anyone you meet.\"";
+    }
+    if (rescued.length < 6) {
+      return "Granny says warmly: \"You have brought " + rescued.length +
+             " child" + (rescued.length === 1 ? '' : 'ren') +
+             " home already. The others are waiting. Beware the cottage " +
+             "if you are not ready.\"";
+    }
+    return "Granny's eyes shine with pride. \"All six children are " +
+           "safe. Now go, little one - a throne room awaits!\"";
+  };
+
+  // --- Teletext block art ----------------------------------------------
+  // Each scene is a small array of strings painted into the art area.
+  // We stick to block characters, box-drawing, and simple punctuation so
+  // the look stays consistent with BBC Micro Mode 7 teletext.
+  GG.ART = {
+    gardenGate: {
+      colour: 'green',
+      rows: [
+        "        GRANNY'S GARDEN GATE            ",
+        "                                        ",
+        "        __/\\__  __/\\__  __/\\__          ",
+        "       (      )(      )(      )         ",
+        "        \\/  \\/  \\/  \\/  \\/  \\/          ",
+        "     ______|___|______|___|______       ",
+        "    |  ___     ___     ___       |      ",
+        "    | |   |   |   |   |   |      |      ",
+        "    | | + |   |   |   | + |      |      ",
+        "    | |___|   |___|   |___|      |      ",
+        "    |____|_____|________|________|      ",
+        "     ##   ||   ||   ##  ||   ##         ",
+        "     ##   ||   ||   ##  ||   ##         ",
+      ],
+    },
+    crossroads: {
+      colour: 'yellow',
+      rows: [
+        "         THE CROSSROADS                  ",
+        "                                        ",
+        "              |  |                      ",
+        "              |  |                      ",
+        "     _________|  |_________             ",
+        "    /         .::.         \\            ",
+        "   /    N     ::::     N    \\           ",
+        "   \\   <-+->  ::::  <-+->   /           ",
+        "    \\____     ::::     ____/            ",
+        "              ::::                      ",
+        "              ::::                      ",
+        "              |  |                      ",
+        "              |  |                      ",
+      ],
+    },
+    forest: {
+      colour: 'green',
+      rows: [
+        "         THE DARK FOREST                 ",
+        "                                        ",
+        "     /\\    /\\  /\\    /\\    /\\           ",
+        "    /##\\  /##\\/##\\  /##\\  /##\\          ",
+        "   /####\\/########\\/####\\/####\\         ",
+        "   /####\\/##/\\####\\/##/\\##/\\##\\         ",
+        "    |##|  |##||##|  |##|  |##|          ",
+        "    |##|  |##||##|  |##|  |##|          ",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~~~~~          ",
+        "       shadows move in the trees        ",
+      ],
+    },
+    river: {
+      colour: 'cyan',
+      rows: [
+        "       THE ENCHANTED RIVER               ",
+        "                                        ",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~         ",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~         ",
+        "   ~~~   ~~~~   ~~~~~~   ~~~~~          ",
+        "    ~~~~     ~~~~   ~~~~~~             ",
+        "       ~~~~~~~~~~~~~~~~~~              ",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~~~~~         ",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~        ",
+        "                                        ",
+        "    stepping stones glimmer below       ",
+      ],
+    },
+    mountainPath: {
+      colour: 'white',
+      rows: [
+        "         THE MOUNTAIN PATH               ",
+        "                                        ",
+        "               /\\                       ",
+        "              /##\\                      ",
+        "             /####\\                     ",
+        "            /######\\                    ",
+        "           /########\\                   ",
+        "          /##########\\                  ",
+        "         /############\\                 ",
+        "        /##############\\                ",
+        "     __/________________\\__             ",
+        "       winding path goes up             ",
+      ],
+    },
+    cottage: {
+      colour: 'magenta',
+      rows: [
+        "        THE WITCH'S COTTAGE              ",
+        "                                        ",
+        "              /\\                        ",
+        "             /##\\                       ",
+        "            /####\\                      ",
+        "           /######\\                     ",
+        "          /________\\                    ",
+        "          |  ||  ||                     ",
+        "          |  ||  ||  * *                ",
+        "          |__||__||                     ",
+        "          |########|                    ",
+        "          |###||###|                    ",
+        "          |_####_##|                    ",
+        "    smoke curls from the chimney        ",
+      ],
+    },
+    crystalCave: {
+      colour: 'cyan',
+      rows: [
+        "        THE CRYSTAL CAVE                 ",
+        "                                        ",
+        "     /\\    /\\      /\\    /\\   /\\        ",
+        "    /##\\  /##\\    /##\\  /##\\ /##\\       ",
+        "   /####\\/####\\  /####\\/####X####\\      ",
+        "   ##############################       ",
+        "   ###  <>  ##  <>  ##  <>  <>###       ",
+        "   ## <>  <>  ##  <>  ##  <>  ##        ",
+        "   ###  <>  <>  <>  <>  <>  <>##        ",
+        "   ##############################       ",
+        "       crystals glitter softly          ",
+      ],
+    },
+    castleRuins: {
+      colour: 'red',
+      rows: [
+        "        THE CASTLE RUINS                 ",
+        "                                        ",
+        "    |\\ /\\  |\\  /\\  /\\  /\\ /|             ",
+        "    | V  \\ | \\/  \\/  \\/ |V |            ",
+        "    |######|########|####|             ",
+        "    |#  ##  ###  ###  ##  #|            ",
+        "    |##  ##  _  ##  _  ## #|            ",
+        "    |#####| | |####| | |###|            ",
+        "    |#####|_|_|####|_|_|###|            ",
+        "    |##########################         ",
+        "    ~~~~~~~~~~~~~~~~~~~~~~~~~~          ",
+        "     an iron gate stands barred         ",
+      ],
+    },
+    throneRoom: {
+      colour: 'yellow',
+      rows: [
+        "         THE THRONE ROOM                 ",
+        "                                        ",
+        "     /\\/\\/\\  /\\/\\/\\  /\\/\\/\\             ",
+        "    /######\\/######\\/######\\            ",
+        "    |######||######||######|            ",
+        "    |###__#||##__##||#__###|            ",
+        "    |##|##||###()#||#(##)##|            ",
+        "    |##|##||#|##|##||#|##|##|           ",
+        "    |_____||_____||_____|               ",
+        "   =======================              ",
+        "      the king and queen rejoice        ",
+      ],
+    },
+  };
+
+  /**
+   * Render the block art for a location into #art-area.
+   * Art is simply plain-text rows; we set the colour of the whole
+   * container from the location's teletext colour.
+   */
+  GG.renderArt = function (key) {
+    const art = GG.ART[key];
+    const area = document.getElementById('art-area');
+    area.innerHTML = '';
+    if (!art) return;
+    const wrap = document.createElement('pre');
+    wrap.className = 'tt-art';
+    wrap.textContent = art.rows.join('\n');
+    wrap.style.color = GG.TELETEXT_COLORS[art.colour] || GG.TELETEXT_COLORS.white;
+    area.appendChild(wrap);
+  };
+
+  // --- Locations & navigation ------------------------------------------
+  GG.LOCATIONS = {
+    gardenGate: {
+      name: "Granny's Garden Gate",
+      exits: [ { to: 'crossroads', label: 'Walk through the gate' } ],
+    },
+    crossroads: {
+      name: 'The Crossroads',
+      exits: [
+        { to: 'forest',       label: 'Take the path into the dark forest' },
+        { to: 'river',        label: 'Follow the winding path to the river' },
+        { to: 'mountainPath', label: 'Climb the winding mountain path' },
+        { to: 'cottage',      label: 'Approach the witch\u2019s cottage' },
+        { to: 'gardenGate',   label: 'Return to Granny\u2019s gate' },
+      ],
+    },
+    forest: {
+      name: 'The Dark Forest',
+      exits: [ { to: 'crossroads', label: 'Return to the crossroads' } ],
+    },
+    river: {
+      name: 'The Enchanted River',
+      exits: [ { to: 'crossroads', label: 'Return to the crossroads' } ],
+    },
+    mountainPath: {
+      name: 'The Mountain Path',
+      exits: [ { to: 'crossroads', label: 'Return to the crossroads' } ],
+    },
+    cottage: {
+      name: "The Witch's Cottage",
+      exits: [ { to: 'crossroads', label: 'Flee back to the crossroads' } ],
+    },
+    crystalCave: {
+      name: 'The Crystal Cave',
+      exits: [ { to: 'mountainPath', label: 'Return to the mountain path' } ],
+    },
+    castleRuins: {
+      name: 'The Castle Ruins',
+      exits: [ { to: 'crossroads', label: 'Return to the crossroads' } ],
+    },
+    throneRoom: {
+      name: 'The Throne Room',
+      exits: [], // victory
+    },
+  };
+
+  // Where hidden locations are reached from, once unlocked.
+  const HIDDEN_EXITS = {
+    mountainPath: { to: 'crystalCave', label: 'Enter the crystal cave' },
+    crossroads:   { to: 'castleRuins', label: 'Approach the castle ruins' },
+    castleRuins:  { to: 'throneRoom',  label: 'Climb to the throne room' },
+  };
+  GG.HIDDEN_EXITS = HIDDEN_EXITS;
+
+  // --- Game state -------------------------------------------------------
+  GG.state = null;
+
+  GG.newGame = function (seed) {
+    if (seed == null) seed = (Math.random() * 0xFFFFFFFF) >>> 0;
+    GG.state = {
+      seed: seed,
+      rng: makeRng(seed),
+      startedAt: Date.now(),
+      currentLocation: 'gardenGate',
+      visited: {},
+      rescued: [],            // filled by puzzle system
+      inventory: [],          // filled by inventory system
+      gameOver: false,
+      stats: { puzzlesSolved: 0, witchEncounters: 0, itemsFound: 0 },
+    };
+    return GG.state;
+  };
+
+  GG.goTo = function (key) {
+    if (!GG.LOCATIONS[key]) throw new Error('unknown location: ' + key);
+    GG.state.currentLocation = key;
+    GG.state.visited[key] = (GG.state.visited[key] || 0) + 1;
+  };
+
+  /**
+   * Render the given location: location header, narrative (typewriter),
+   * and numbered menu of exits.
+   * The narrative content itself is filled in by task 5; for now we
+   * show a placeholder.
+   */
+  GG.renderLocation = async function (key) {
+    const loc = GG.LOCATIONS[key];
+    if (!loc) throw new Error('unknown location: ' + key);
+    GG.goTo(key);
+
+    // Scene art (with a gentle fade-in for scene changes)
+    const art = document.getElementById('art-area');
+    if (art) {
+      art.classList.remove('tt-fade');
+      // Force reflow so the animation restarts.
+      void art.offsetWidth;
+      art.classList.add('tt-fade');
+    }
+    GG.renderArt(key);
+
+    // Header (inside the status area until task 10 gives us a dedicated bar)
+    const status = document.getElementById('status-area');
+    let header = document.getElementById('location-header');
+    if (!header) {
+      header = document.createElement('div');
+      header.id = 'location-header';
+      header.style.fontWeight = 'bold';
+      status.prepend(header);
+    }
+    header.textContent = '— ' + loc.name + ' —';
+
+    // Narrative text: first-visit on first visit, revisit otherwise.
+    const textArea = document.getElementById('text-area');
+    const visits = GG.state.visited[key] || 0;
+    const entry  = GG.NARRATIVE && GG.NARRATIVE[key];
+    let narration;
+    if (entry) {
+      narration = visits <= 1 ? entry.first : entry.revisit;
+    } else {
+      narration = 'You are at ' + loc.name + '.';
+    }
+    // Granny adds a contextual hint on revisits of the garden gate.
+    if (key === 'gardenGate' && visits > 1) {
+      narration += ' ' + GG.grannyHint();
+    }
+    await GG.typewriter(textArea, narration, { onChar: GG.blip });
+
+    // Menu
+    renderMenu(loc.exits.concat(collectHiddenExits(key)));
+  };
+
+  function collectHiddenExits(key) {
+    // Task 7/8 will gate these; for now show only if state.unlocked has it.
+    const hidden = HIDDEN_EXITS[key];
+    if (!hidden) return [];
+    if (GG.state && GG.state.unlocked && GG.state.unlocked[hidden.to]) {
+      return [hidden];
+    }
+    return [];
+  }
+
+  function renderMenu(exits) {
+    const menu = document.getElementById('menu-area');
+    menu.innerHTML = '';
+    exits.forEach((exit, idx) => {
+      const n = idx + 1;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'tt-choice';
+      btn.dataset.menuChoice = exit.to;
+      btn.dataset.choiceNum  = String(n);
+      btn.setAttribute('role', 'menuitem');
+      btn.setAttribute('aria-label',
+        `Choice ${n}: ${exit.label}. Press ${n} or click to select.`);
+      btn.textContent = n + '. ' + exit.label;
+      btn.addEventListener('click', () => selectChoice(exit.to));
+      menu.appendChild(btn);
+      menu.appendChild(document.createElement('br'));
+    });
+  }
+
+  function selectChoice(targetKey) {
+    GG.skipTypewriter();
+    // Small delay so any in-progress render settles
+    setTimeout(() => { GG.renderLocation(targetKey); }, 20);
+  }
+
+  // --- Bootstrap --------------------------------------------------------
+  function boot() {
+    document.getElementById('crt-toggle').addEventListener('click', GG.toggleCRT);
+
+    const muteBtn = document.getElementById('mute-toggle');
+    if (muteBtn) {
+      muteBtn.addEventListener('click', () => {
+        GG.Audio.init();                    // user gesture unlocks audio
+        GG.Audio.setMuted(!GG.Audio.muted);
+      });
+    }
+    // Lazy-init the audio context on the first user interaction.
+    const unlock = () => {
+      GG.Audio.init();
+      document.removeEventListener('click', unlock);
+      document.removeEventListener('keydown', unlock);
+    };
+    document.addEventListener('click', unlock);
+    document.addEventListener('keydown', unlock);
+
+    // Skip typewriter on click anywhere in the panel or on Space key.
+    const panel = document.getElementById('display-panel');
+    panel.addEventListener('click', (ev) => {
+      // Don't skip when clicking a menu choice button.
+      if (ev.target && ev.target.closest('[data-menu-choice]')) return;
+      GG.skipTypewriter();
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === ' ' || ev.code === 'Space') {
+        GG.skipTypewriter();
+        return;
+      }
+      // Number keys 1-9 trigger menu choices.
+      if (/^[1-9]$/.test(ev.key)) {
+        const btn = document.querySelector(
+          `[data-menu-choice][data-choice-num="${ev.key}"]`);
+        if (btn) { ev.preventDefault(); btn.click(); }
+      }
+    });
+
+    // Start the game
+    GG.newGame();
+    GG.renderLocation('gardenGate');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

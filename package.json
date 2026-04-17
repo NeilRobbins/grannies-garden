@@ -1,0 +1,19 @@
+{
+  "name": "grannies-garden",
+  "version": "1.0.0",
+  "description": "",
+  "main": "create-issues.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:35959/git/NeilRobbins/grannies-garden"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "playwright": "^1.50.0"
+  }
+}
