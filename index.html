@@ -1515,6 +1515,12 @@
     if (!loc) throw new Error('unknown location: ' + key);
     GG.goTo(key);
 
+    // Throne room is the victory destination.
+    if (key === 'throneRoom' && GG.isVictory()) {
+      await GG.renderVictory();
+      return;
+    }
+
     // Scene art (with a gentle fade-in for scene changes)
     const art = document.getElementById('art-area');
     if (art) {
@@ -1748,6 +1754,10 @@
     // Castle ruins appear at the crossroads once 3+ children are rescued.
     if (key === 'crossroads' && hidden.to === 'castleRuins') {
       return GG.state.rescued.length >= 3 ? [hidden] : [];
+    }
+    // Throne room only opens when ALL children are rescued.
+    if (key === 'castleRuins' && hidden.to === 'throneRoom') {
+      return GG.isVictory() ? [hidden] : [];
     }
     // Other hidden exits (e.g. crystalCave) unlock by solving the local puzzle.
     if (GG.state.unlocked && GG.state.unlocked[hidden.to]) {
