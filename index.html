@@ -460,14 +460,24 @@
     _master: null,
 
     init: function () {
-      if (this.ctx) return this.ctx;
-      const AC = window.AudioContext || window.webkitAudioContext;
+      if (this.ctx) {
+        // iOS Safari suspends the context until a user gesture resumes it.
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume().catch(function () {});
+        }
+        return this.ctx;
+      }
+      var AC = window.AudioContext || window.webkitAudioContext;
       if (typeof AC !== 'function') return null;
       try {
         this.ctx = new AC();
         this._master = this.ctx.createGain();
         this._master.gain.value = this.muted ? 0 : 0.15;
         this._master.connect(this.ctx.destination);
+        // Immediately resume — required on iOS Safari.
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume().catch(function () {});
+        }
       } catch (_) {
         this.ctx = null;
       }
@@ -484,6 +494,7 @@
     // --- Primitives ---
     _tone: function (freq, durMs, type, vol) {
       if (!this.ctx || this.muted) return;
+      if (this.ctx.state === 'suspended') this.ctx.resume().catch(function () {});
       try {
         const now = this.ctx.currentTime;
         const osc = this.ctx.createOscillator();
@@ -503,6 +514,7 @@
 
     _noise: function (durMs, vol) {
       if (!this.ctx || this.muted) return;
+      if (this.ctx.state === 'suspended') this.ctx.resume().catch(function () {});
       try {
         const frames = Math.max(1, Math.floor(this.ctx.sampleRate * durMs / 1000));
         const buf = this.ctx.createBuffer(1, frames, this.ctx.sampleRate);
