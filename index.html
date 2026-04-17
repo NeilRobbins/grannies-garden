@@ -1742,10 +1742,15 @@
   }
 
   function collectHiddenExits(key) {
-    // Task 7/8 will gate these; for now show only if state.unlocked has it.
     const hidden = HIDDEN_EXITS[key];
     if (!hidden) return [];
-    if (GG.state && GG.state.unlocked && GG.state.unlocked[hidden.to]) {
+    if (!GG.state) return [];
+    // Castle ruins appear at the crossroads once 3+ children are rescued.
+    if (key === 'crossroads' && hidden.to === 'castleRuins') {
+      return GG.state.rescued.length >= 3 ? [hidden] : [];
+    }
+    // Other hidden exits (e.g. crystalCave) unlock by solving the local puzzle.
+    if (GG.state.unlocked && GG.state.unlocked[hidden.to]) {
       return [hidden];
     }
     return [];
