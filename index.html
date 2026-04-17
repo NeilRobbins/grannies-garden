@@ -230,6 +230,51 @@
     #display-panel { width: calc(100vw - 24px); }
   }
 
+  /* ---------- Info modal ---------- */
+  #info-modal {
+    border: 1px solid var(--tt-cyan);
+    border-radius: 12px;
+    background: #111;
+    color: var(--tt-white);
+    font-family: "Courier New", "Lucida Console", monospace;
+    max-width: 380px;
+    padding: 0;
+  }
+  #info-modal::backdrop { background: rgba(0,0,0,0.7); }
+  .info-modal-inner {
+    padding: 20px 24px;
+    line-height: 1.5;
+    font-size: 14px;
+  }
+  .info-modal-inner h2 {
+    color: var(--tt-yellow);
+    font-size: 18px;
+    margin: 0 0 12px;
+  }
+  .info-modal-inner p { margin: 0 0 10px; }
+  .info-version {
+    color: var(--tt-cyan);
+    font-size: 12px;
+    opacity: 0.7;
+  }
+  .info-modal-inner button {
+    display: block;
+    margin: 14px auto 0;
+    padding: 6px 28px;
+    background: transparent;
+    color: var(--tt-yellow);
+    border: 1px solid var(--tt-yellow);
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .info-modal-inner button:hover,
+  .info-modal-inner button:focus {
+    background: var(--tt-yellow);
+    color: #000;
+  }
+
   /* ---------- Gentle fade for panel transitions ---------- */
   @keyframes tt-fade-in {
     from { opacity: 0; }
@@ -267,7 +312,28 @@
   <div class="tt-controls">
     <button id="crt-toggle" aria-label="Toggle CRT effect" title="Toggle CRT effect">CRT</button>
     <button id="mute-toggle" aria-label="Toggle sound" title="Toggle sound">♪</button>
+    <button id="info-btn" aria-label="Game info" title="About this game">?</button>
   </div>
+
+  <dialog id="info-modal" aria-label="About Granny's Garden">
+    <div class="info-modal-inner">
+      <h2>Granny's Garden</h2>
+      <p>
+        A loving tribute to the original <strong>Granny's Garden</strong>,
+        created by <strong>Mike Matson</strong> and published by
+        <strong>4Mation Educational Resources</strong> in <strong>1983</strong>
+        for the <strong>BBC Micro</strong>.
+      </p>
+      <p>
+        The original became one of the most widely used pieces of educational
+        software in British primary schools throughout the 1980s and 1990s,
+        introducing a generation of children to computers through adventure
+        and imagination.
+      </p>
+      <p class="info-version">Version 1.0</p>
+      <button data-close-modal aria-label="Close">Close</button>
+    </div>
+  </dialog>
 
   <div id="display-panel" aria-live="polite">
     <div id="art-area"    aria-label="scene"></div>
@@ -1506,6 +1572,17 @@
   // --- Bootstrap --------------------------------------------------------
   function boot() {
     document.getElementById('crt-toggle').addEventListener('click', GG.toggleCRT);
+
+    const infoBtn = document.getElementById('info-btn');
+    const infoModal = document.getElementById('info-modal');
+    if (infoBtn && infoModal) {
+      infoBtn.addEventListener('click', () => infoModal.showModal());
+      infoModal.querySelector('[data-close-modal]')
+        .addEventListener('click', () => infoModal.close());
+      infoModal.addEventListener('click', (e) => {
+        if (e.target === infoModal) infoModal.close();
+      });
+    }
 
     const muteBtn = document.getElementById('mute-toggle');
     if (muteBtn) {

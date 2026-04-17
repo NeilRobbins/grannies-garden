@@ -1384,6 +1384,57 @@
     assertEq(GG.state.stats.witchEncounters, 2);
   });
 
+  // ============================================================
+  // Info modal
+  // ============================================================
+
+  test('info button exists in controls bar', ({ doc }) => {
+    const btn = doc.getElementById('info-btn');
+    assert(btn, 'info button exists');
+    assert(btn.getAttribute('aria-label'), 'has aria-label');
+  });
+
+  test('info modal is hidden by default', ({ doc }) => {
+    const modal = doc.getElementById('info-modal');
+    assert(modal, 'modal element exists');
+    const style = doc.defaultView.getComputedStyle(modal);
+    assert(style.display === 'none' || modal.hidden || !modal.open,
+      'modal not visible initially');
+  });
+
+  test('clicking info button opens the modal', ({ doc }) => {
+    const btn = doc.getElementById('info-btn');
+    btn.click();
+    const modal = doc.getElementById('info-modal');
+    assert(modal.open || doc.defaultView.getComputedStyle(modal).display !== 'none',
+      'modal visible after click');
+  });
+
+  test('modal mentions original creator and heritage', ({ doc }) => {
+    const modal = doc.getElementById('info-modal');
+    const text = modal.textContent.toLowerCase();
+    assert(/mike\s*matson/.test(text), 'credits Mike Matson');
+    assert(/4mation|4-mation/.test(text), 'credits 4Mation');
+    assert(/1983|bbc\s*micro/.test(text), 'mentions the original year or platform');
+  });
+
+  test('modal contains a version number', ({ doc }) => {
+    const modal = doc.getElementById('info-modal');
+    const text = modal.textContent;
+    assert(/\d+\.\d+/.test(text), 'version number present (x.y format)');
+  });
+
+  test('modal can be closed', ({ doc }) => {
+    const modal = doc.getElementById('info-modal');
+    // Open it first
+    doc.getElementById('info-btn').click();
+    // Close via the close button
+    const close = modal.querySelector('[data-close-modal]');
+    assert(close, 'close button exists');
+    close.click();
+    assert(!modal.open, 'modal closed after clicking close');
+  });
+
   runAll();
 </script>
 </body>
